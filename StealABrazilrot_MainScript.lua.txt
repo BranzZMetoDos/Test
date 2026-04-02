@@ -1,0 +1,1168 @@
+-- ============================================================
+--   STEAL A BRAZILROT - Script Principal
+--   Coloque em: ServerScriptService
+--   Gera mapa completo + sistemas em 3 segundos
+-- ============================================================
+
+local Players = game:GetService("Players")
+local DataStoreService = game:GetService("DataStoreService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local Lighting = game:GetService("Lighting")
+
+local DataStore = DataStoreService:GetDataStore("BrazilrotData_v1")
+
+-- ============================================================
+-- CONFIGURAÇÕES GERAIS
+-- ============================================================
+local CONFIG = {
+	NUM_BASES = 8,
+	BASE_SIZE = Vector3.new(40, 1, 40),
+	BASE_SPACING = 60,
+	MAP_CENTER = Vector3.new(0, 0, 0),
+	LOCK_TIME_BASE = 30,
+	LOCK_TIME_RELOCK = 60,
+	LOCK_TIME_PER_REBIRTH = 10,
+	STEAL_SLOW_MULTIPLIER = 0.3,
+	STARTING_CASH = 100,
+	CONVEYOR_REFRESH_TIME = 15,
+}
+
+-- ============================================================
+-- BRAZILROTS DISPONÍVEIS
+-- ============================================================
+local BRAZILROTS = {
+	{ name = "Noobzinho Pixinho",       price = 50,       income = 5,       color = Color3.fromRGB(0, 120, 255),   rarity = "Comum"     },
+	{ name = "Frangasso Assadão",       price = 200,      income = 20,      color = Color3.fromRGB(255, 165, 0),   rarity = "Comum"     },
+	{ name = "Jacarézinho Pixinho",     price = 500,      income = 55,      color = Color3.fromRGB(34, 139, 34),   rarity = "Incomum"   },
+	{ name = "Ônibusão Atrasadão",      price = 1200,     income = 130,     color = Color3.fromRGB(100, 100, 200), rarity = "Incomum"   },
+	{ name = "Baladeiro Funkadão",      price = 3000,     income = 340,     color = Color3.fromRGB(255, 0, 150),   rarity = "Raro"      },
+	{ name = "Nenenzão Ronaldinho",     price = 7500,     income = 850,     color = Color3.fromRGB(0, 200, 100),   rarity = "Raro"      },
+	{ name = "Nordestino Chovião",      price = 18000,    income = 2100,    color = Color3.fromRGB(30, 144, 255),  rarity = "Épico"     },
+	{ name = "Capivarão Chefão",        price = 45000,    income = 5200,    color = Color3.fromRGB(139, 90, 43),   rarity = "Épico"     },
+	{ name = "Tucano Federalão",        price = 120000,   income = 14000,   color = Color3.fromRGB(255, 215, 0),   rarity = "Lendário"  },
+	{ name = "Brazilrot Supremo",       price = 500000,   income = 60000,   color = Color3.fromRGB(200, 0, 255),   rarity = "Deus"      },
+}
+
+local RARITY_COLORS = {
+	Comum    = Color3.fromRGB(180, 180, 180),
+	Incomum  = Color3.fromRGB(0, 200, 80),
+	Raro     = Color3.fromRGB(0, 120, 255),
+	Épico    = Color3.fromRGB(160, 0, 255),
+	Lendário = Color3.fromRGB(255, 200, 0),
+	Deus     = Color3.fromRGB(255, 0, 100),
+}
+
+-- ============================================================
+-- ESTADO DO SERVIDOR
+-- ============================================================
+local playerData = {}       -- [userId] = { cash, brazilrots, rebirths, baseIndex }
+local baseOwners = {}       -- [baseIndex] = userId
+local baseLocks = {}        -- [baseIndex] = unlockTime
+local baseModels = {}       -- [baseIndex] = Model
+local conveyorBrazilrot = nil
+local conveyorPrice = 0
+
+-- ============================================================
+-- REMOTES
+-- ============================================================
+local Remotes = Instance.new("Folder")
+Remotes.Name = "BrazilrotRemotes"
+Remotes.Parent = ReplicatedStorage
+
+local function makeRemote(name, isFunction)
+	local r
+	if isFunction then
+		r = Instance.new("RemoteFunction")
+	else
+		r = Instance.new("RemoteEvent")
+	end
+	r.Name = name
+	r.Parent = Remotes
+	return r
+end
+
+local RE_UpdateHUD        = makeRemote("UpdateHUD")
+local RE_Notification     = makeRemote("Notification")
+local RE_UpdateBase       = makeRemote("UpdateBase")
+local RE_ConveyorUpdate   = makeRemote("ConveyorUpdate")
+local RF_BuyConveyor      = makeRemote("BuyConveyor", true)
+local RF_StealBrazilrot   = makeRemote("StealBrazilrot", true)
+local RF_LockBase         = makeRemote("LockBase", true)
+local RF_Rebirth          = makeRemote("Rebirth", true)
+local RF_GetData          = makeRemote("GetData", true)
+
+-- ============================================================
+-- FUNÇÕES UTILITÁRIAS
+-- ============================================================
+local function formatCash(n)
+	if n >= 1e12 then return string.format("%.1fT", n/1e12)
+	elseif n >= 1e9 then return string.format("%.1fB", n/1e9)
+	elseif n >= 1e6 then return string.format("%.1fM", n/1e6)
+	elseif n >= 1e3 then return string.format("%.1fK", n/1e3)
+	else return tostring(math.floor(n)) end
+end
+
+local function getPlayerData(userId)
+	return playerData[userId]
+end
+
+local function saveData(userId)
+	local data = playerData[userId]
+	if not data then return end
+	local ok, err = pcall(function()
+		DataStore:SetAsync("player_"..userId, {
+			cash      = data.cash,
+			rebirths  = data.rebirths,
+			brazilrots = data.brazilrots,
+		})
+	end)
+	if not ok then warn("Erro ao salvar dados: "..tostring(err)) end
+end
+
+local function loadData(userId)
+	local saved
+	local ok, err = pcall(function()
+		saved = DataStore:GetAsync("player_"..userId)
+	end)
+	if ok and saved then
+		return {
+			cash       = saved.cash or CONFIG.STARTING_CASH,
+			rebirths   = saved.rebirths or 0,
+			brazilrots = saved.brazilrots or {},
+			baseIndex  = nil,
+		}
+	else
+		return {
+			cash       = CONFIG.STARTING_CASH,
+			rebirths   = 0,
+			brazilrots = {},
+			baseIndex  = nil,
+		}
+	end
+end
+
+local function broadcastHUD(player)
+	local data = getPlayerData(player.UserId)
+	if not data then return end
+	local total_income = 0
+	for _, br in ipairs(data.brazilrots) do
+		total_income += br.income
+	end
+	RE_UpdateHUD:FireClient(player, {
+		cash         = data.cash,
+		cashStr      = formatCash(data.cash),
+		rebirths     = data.rebirths,
+		income       = total_income,
+		incomeStr    = formatCash(total_income).."/s",
+		brazilrotCount = #data.brazilrots,
+	})
+end
+
+-- ============================================================
+-- CONSTRUÇÃO DO MAPA
+-- ============================================================
+local function makePart(parent, size, position, color, name, anchored, material)
+	local p = Instance.new("Part")
+	p.Name = name or "Part"
+	p.Size = size
+	p.Position = position
+	p.BrickColor = BrickColor.new(color or "Medium stone grey")
+	p.Material = material or Enum.Material.SmoothPlastic
+	p.Anchored = anchored ~= false
+	p.Parent = parent
+	return p
+end
+
+local function addLabel(parent, text, position, color)
+	local billboard = Instance.new("BillboardGui")
+	billboard.Size = UDim2.new(0, 200, 0, 50)
+	billboard.StudsOffset = Vector3.new(0, 3, 0)
+	billboard.AlwaysOnTop = false
+	billboard.Parent = parent
+
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.new(1, 0, 1, 0)
+	label.BackgroundTransparency = 1
+	label.Text = text
+	label.TextColor3 = color or Color3.new(1,1,1)
+	label.TextScaled = true
+	label.Font = Enum.Font.GothamBold
+	label.Parent = billboard
+	return billboard
+end
+
+local function buildBase(index, position)
+	local model = Instance.new("Model")
+	model.Name = "Base_"..index
+	model.Parent = workspace
+
+	-- Chão da base
+	local floor = makePart(model, CONFIG.BASE_SIZE, position, "Bright green", "Floor", true, Enum.Material.Grass)
+	floor.TopSurface = Enum.SurfaceType.Smooth
+
+	-- Bordas
+	local borderColor = "Bright red"
+	local borders = {
+		{ Vector3.new(CONFIG.BASE_SIZE.X, 2, 1), position + Vector3.new(0, 1, -CONFIG.BASE_SIZE.Z/2) },
+		{ Vector3.new(CONFIG.BASE_SIZE.X, 2, 1), position + Vector3.new(0, 1,  CONFIG.BASE_SIZE.Z/2) },
+		{ Vector3.new(1, 2, CONFIG.BASE_SIZE.Z), position + Vector3.new(-CONFIG.BASE_SIZE.X/2, 1, 0) },
+		{ Vector3.new(1, 2, CONFIG.BASE_SIZE.Z), position + Vector3.new( CONFIG.BASE_SIZE.X/2, 1, 0) },
+	}
+	for i, b in ipairs(borders) do
+		makePart(model, b[1], b[2], borderColor, "Border"..i, true, Enum.Material.Neon)
+	end
+
+	-- Plataforma do escudo
+	local shieldPad = makePart(model, Vector3.new(6, 0.5, 6),
+		position + Vector3.new(0, 0.75, -CONFIG.BASE_SIZE.Z/2 + 5),
+		"Bright blue", "ShieldPad", true, Enum.Material.Neon)
+
+	addLabel(shieldPad, "🔒 LOCK BASE", Color3.fromRGB(0, 200, 255))
+
+	-- Label da base
+	local signPart = makePart(model, Vector3.new(8, 4, 1),
+		position + Vector3.new(0, 3, CONFIG.BASE_SIZE.Z/2 - 1),
+		"White", "Sign", true)
+	addLabel(signPart, "BASE "..index, Color3.fromRGB(255, 200, 0))
+
+	-- Escudo (inicialmente invisível)
+	local shield = Instance.new("Part")
+	shield.Name = "Shield"
+	shield.Size = Vector3.new(CONFIG.BASE_SIZE.X + 2, 20, CONFIG.BASE_SIZE.Z + 2)
+	shield.Position = position + Vector3.new(0, 10, 0)
+	shield.Anchored = true
+	shield.CanCollide = false
+	shield.Transparency = 1
+	shield.BrickColor = BrickColor.new("Cyan")
+	shield.Material = Enum.Material.Neon
+	shield.Parent = model
+
+	-- Pasta dos brazilrots da base
+	local brFolder = Instance.new("Folder")
+	brFolder.Name = "Brazilrots"
+	brFolder.Parent = model
+
+	baseModels[index] = model
+	return model
+end
+
+local function buildConveyor()
+	local convModel = Instance.new("Model")
+	convModel.Name = "Conveyor"
+	convModel.Parent = workspace
+
+	-- Esteira
+	local belt = makePart(convModel, Vector3.new(8, 1, 120), Vector3.new(0, 0.5, 0), "Bright yellow", "Belt", true, Enum.Material.SmoothPlastic)
+	belt.TopSurface = Enum.SurfaceType.Smooth
+
+	-- Bordas da esteira
+	makePart(convModel, Vector3.new(1, 2, 120), Vector3.new(-4.5, 1, 0), "Dark orange", "BeltSideL", true)
+	makePart(convModel, Vector3.new(1, 2, 120), Vector3.new( 4.5, 1, 0), "Dark orange", "BeltSideR", true)
+
+	-- Plataforma do produto
+	local platform = makePart(convModel, Vector3.new(7, 0.5, 7), Vector3.new(0, 1.25, 0), "White", "Platform", true, Enum.Material.Neon)
+	addLabel(platform, "🛒 CLIQUE PARA COMPRAR", Color3.fromRGB(255, 255, 0))
+
+	-- Loja
+	local shopStand = makePart(convModel, Vector3.new(12, 5, 8), Vector3.new(0, 3, -65), "Bright blue", "ShopStand", true)
+	addLabel(shopStand, "🏪 LOJA\nClique para comprar itens", Color3.fromRGB(100, 200, 255))
+
+	return convModel, platform
+end
+
+local function buildDecoration()
+	-- Chão do mapa
+	local ground = makePart(workspace, Vector3.new(300, 1, 300), Vector3.new(0, -1, 0), "Sand green", "Ground", true, Enum.Material.Grass)
+	ground.TopSurface = Enum.SurfaceType.Smooth
+
+	-- Céu
+	Lighting.Sky = Instance.new("Sky")
+	Lighting.Brightness = 2
+	Lighting.Ambient = Color3.fromRGB(120, 120, 180)
+
+	-- Nome do jogo no centro
+	local sign = makePart(workspace, Vector3.new(30, 8, 1), Vector3.new(0, 8, -20), "White", "TitleSign", true)
+	addLabel(sign, "🇧🇷 STEAL A BRAZILROT 🇧🇷", Color3.fromRGB(0, 200, 100))
+end
+
+local function generateMap()
+	-- Posições das 8 bases em círculo
+	local radius = 90
+	for i = 1, CONFIG.NUM_BASES do
+		local angle = (i - 1) * (2 * math.pi / CONFIG.NUM_BASES)
+		local x = math.cos(angle) * radius
+		local z = math.sin(angle) * radius
+		local pos = Vector3.new(x, 0.5, z)
+		buildBase(i, pos)
+		baseLocks[i] = 0
+	end
+
+	buildConveyor()
+	buildDecoration()
+end
+
+-- ============================================================
+-- BRAZILROT 3D NA BASE
+-- ============================================================
+local function spawnBrazilrotModel(base, brazilrotData, slot)
+	local brFolder = base:FindFirstChild("Brazilrots")
+	if not brFolder then return end
+
+	-- Remove antigo se existir
+	local old = brFolder:FindFirstChild("Slot_"..slot)
+	if old then old:Destroy() end
+
+	local model = Instance.new("Model")
+	model.Name = "Slot_"..slot
+	model.Parent = brFolder
+
+	local baseFloor = base:FindFirstChild("Floor")
+	local basePos = baseFloor and baseFloor.Position or Vector3.new(0,0,0)
+
+	-- Offset por slot
+	local offsets = {
+		Vector3.new(-12, 0, -10), Vector3.new(0, 0, -10), Vector3.new(12, 0, -10),
+		Vector3.new(-12, 0, 0),   Vector3.new(0, 0, 0),   Vector3.new(12, 0, 0),
+		Vector3.new(-6,  0, 10),  Vector3.new(6,  0, 10),
+	}
+	local offset = offsets[slot] or Vector3.new(0, 0, 0)
+	local spawnPos = basePos + offset + Vector3.new(0, 2, 0)
+
+	-- Corpo do brazilrot
+	local body = Instance.new("Part")
+	body.Name = "Body"
+	body.Size = Vector3.new(3, 4, 3)
+	body.Position = spawnPos
+	body.BrickColor = BrickColor.new(brazilrotData.color)
+	body.Material = Enum.Material.SmoothPlastic
+	body.Anchored = true
+	body.Shape = Enum.PartType.Ball
+	body.Parent = model
+
+	-- Olhos
+	local eyeL = Instance.new("Part")
+	eyeL.Size = Vector3.new(0.6, 0.6, 0.6)
+	eyeL.Position = spawnPos + Vector3.new(-0.7, 0.8, -1.4)
+	eyeL.BrickColor = BrickColor.new("White")
+	eyeL.Anchored = true
+	eyeL.Shape = Enum.PartType.Ball
+	eyeL.Material = Enum.Material.Neon
+	eyeL.Parent = model
+
+	local eyeR = eyeL:Clone()
+	eyeR.Position = spawnPos + Vector3.new(0.7, 0.8, -1.4)
+	eyeR.Parent = model
+
+	-- Label com nome e renda
+	local billboard = Instance.new("BillboardGui")
+	billboard.Size = UDim2.new(0, 200, 0, 60)
+	billboard.StudsOffset = Vector3.new(0, 3.5, 0)
+	billboard.Parent = body
+
+	local nameLabel = Instance.new("TextLabel")
+	nameLabel.Size = UDim2.new(1, 0, 0.6, 0)
+	nameLabel.BackgroundTransparency = 1
+	nameLabel.Text = brazilrotData.name
+	nameLabel.TextColor3 = Color3.new(1, 1, 1)
+	nameLabel.TextScaled = true
+	nameLabel.Font = Enum.Font.GothamBold
+	nameLabel.TextStrokeTransparency = 0
+	nameLabel.Parent = billboard
+
+	local incomeLabel = Instance.new("TextLabel")
+	incomeLabel.Size = UDim2.new(1, 0, 0.4, 0)
+	incomeLabel.Position = UDim2.new(0, 0, 0.6, 0)
+	incomeLabel.BackgroundTransparency = 1
+	incomeLabel.Text = "💰 "..formatCash(brazilrotData.income).."/s"
+	incomeLabel.TextColor3 = Color3.fromRGB(0, 255, 100)
+	incomeLabel.TextScaled = true
+	incomeLabel.Font = Enum.Font.Gotham
+	incomeLabel.Parent = billboard
+
+	-- Tag de raridade
+	local rarTag = Instance.new("TextLabel")
+	rarTag.Size = UDim2.new(1, 0, 0.3, 0)
+	rarTag.Position = UDim2.new(0, 0, -0.3, 0)
+	rarTag.BackgroundTransparency = 1
+	rarTag.Text = "["..brazilrotData.rarity.."]"
+	rarTag.TextColor3 = RARITY_COLORS[brazilrotData.rarity] or Color3.new(1,1,1)
+	rarTag.TextScaled = true
+	rarTag.Font = Enum.Font.GothamBold
+	rarTag.Parent = billboard
+
+	model.PrimaryPart = body
+	return model
+end
+
+local function refreshBaseVisuals(baseIndex)
+	local base = baseModels[baseIndex]
+	if not base then return end
+
+	-- Pegar dono
+	local ownerId = baseOwners[baseIndex]
+	if not ownerId then return end
+
+	local data = playerData[ownerId]
+	if not data then return end
+
+	-- Atualizar modelos 3D
+	for slot, br in ipairs(data.brazilrots) do
+		spawnBrazilrotModel(base, br, slot)
+	end
+end
+
+-- ============================================================
+-- CONVEYOR - BRAZILROT À VENDA
+-- ============================================================
+local conveyorPlatform = nil
+
+local function refreshConveyor()
+	-- Escolhe brazilrot aleatório ponderado (mais baratos mais comuns)
+	local weights = {}
+	local total = 0
+	for i, br in ipairs(BRAZILROTS) do
+		local w = math.max(1, 11 - i) * 10
+		total += w
+		weights[i] = w
+	end
+	local roll = math.random(1, total)
+	local acc = 0
+	local chosen = BRAZILROTS[1]
+	for i, br in ipairs(BRAZILROTS) do
+		acc += weights[i]
+		if roll <= acc then
+			chosen = br
+			break
+		end
+	end
+
+	conveyorBrazilrot = chosen
+	conveyorPrice = chosen.price
+
+	-- Atualizar visual no conveyor
+	if conveyorPlatform then
+		local billboard = conveyorPlatform:FindFirstChildOfClass("BillboardGui")
+		if billboard then
+			local label = billboard:FindFirstChildOfClass("TextLabel")
+			if label then
+				label.Text = chosen.name.."\n💰 "..formatCash(chosen.price)
+			end
+		end
+	end
+
+	-- Avisar todos
+	RE_ConveyorUpdate:FireAllClients({
+		name    = chosen.name,
+		price   = chosen.price,
+		priceStr = formatCash(chosen.price),
+		rarity  = chosen.rarity,
+		color   = { chosen.color.R, chosen.color.G, chosen.color.B },
+	})
+end
+
+-- ============================================================
+-- SISTEMA DE ESCUDO
+-- ============================================================
+local function setShield(baseIndex, active)
+	local base = baseModels[baseIndex]
+	if not base then return end
+	local shield = base:FindFirstChild("Shield")
+	if not shield then return end
+
+	if active then
+		shield.Transparency = 0.5
+		shield.CanCollide = true
+	else
+		shield.Transparency = 1
+		shield.CanCollide = false
+	end
+end
+
+local function isBaseLocked(baseIndex)
+	return baseLocks[baseIndex] and baseLocks[baseIndex] > tick()
+end
+
+-- ============================================================
+-- REMOTES - HANDLERS
+-- ============================================================
+
+-- Comprar do conveyor
+RF_BuyConveyor.OnServerInvoke = function(player)
+	local data = getPlayerData(player.UserId)
+	if not data then return false, "Dados não encontrados." end
+	if not conveyorBrazilrot then return false, "Nenhum Brazilrot disponível." end
+	if data.cash < conveyorPrice then
+		return false, "Dinheiro insuficiente! Precisa de "..formatCash(conveyorPrice)
+	end
+	if #data.brazilrots >= 8 then
+		return false, "Base cheia! Máximo de 8 Brazilrots."
+	end
+
+	data.cash -= conveyorPrice
+	table.insert(data.brazilrots, {
+		name   = conveyorBrazilrot.name,
+		income = conveyorBrazilrot.income,
+		color  = conveyorBrazilrot.color,
+		rarity = conveyorBrazilrot.rarity,
+		price  = conveyorBrazilrot.price,
+	})
+
+	-- Aumentar preço após compra
+	conveyorPrice = math.floor(conveyorPrice * 1.3)
+
+	broadcastHUD(player)
+	refreshBaseVisuals(data.baseIndex)
+	RE_Notification:FireClient(player, "✅ Comprou: "..conveyorBrazilrot.name.."!", "success")
+	saveData(player.UserId)
+	return true, "Comprado!"
+end
+
+-- Roubar brazilrot
+RF_StealBrazilrot.OnServerInvoke = function(player, targetBaseIndex, slot)
+	local data = getPlayerData(player.UserId)
+	if not data then return false, "Erro." end
+
+	if targetBaseIndex == data.baseIndex then
+		return false, "Não pode roubar da sua própria base!"
+	end
+
+	if isBaseLocked(targetBaseIndex) then
+		return false, "🔒 Base bloqueada! Não pode roubar agora."
+	end
+
+	local targetOwnerId = baseOwners[targetBaseIndex]
+	if not targetOwnerId then return false, "Base vazia." end
+
+	local targetData = playerData[targetOwnerId]
+	if not targetData or #targetData.brazilrots == 0 then
+		return false, "Nenhum Brazilrot para roubar!"
+	end
+
+	if #data.brazilrots >= 8 then
+		return false, "Sua base está cheia!"
+	end
+
+	-- Roubar slot específico ou aleatório
+	local stealSlot = slot or math.random(1, #targetData.brazilrots)
+	local stolen = targetData.brazilrots[stealSlot]
+	if not stolen then return false, "Brazilrot não encontrado." end
+
+	table.remove(targetData.brazilrots, stealSlot)
+	table.insert(data.brazilrots, stolen)
+
+	-- Aplicar slow no ladrão
+	local character = player.Character
+	if character then
+		local humanoid = character:FindFirstChildOfClass("Humanoid")
+		if humanoid then
+			local originalSpeed = humanoid.WalkSpeed
+			humanoid.WalkSpeed = originalSpeed * CONFIG.STEAL_SLOW_MULTIPLIER
+			task.delay(8, function()
+				if humanoid and humanoid.Parent then
+					humanoid.WalkSpeed = originalSpeed
+				end
+			end)
+		end
+	end
+
+	-- Notificar dono
+	local targetPlayer = Players:GetPlayerByUserId(targetOwnerId)
+	if targetPlayer then
+		RE_Notification:FireClient(targetPlayer,
+			"🚨 "..player.Name.." roubou seu "..stolen.name.."!", "danger")
+	end
+
+	-- Notificar ladrão
+	RE_Notification:FireClient(player, "💀 Roubou: "..stolen.name.." (você está lento por 8s!)", "warning")
+
+	refreshBaseVisuals(data.baseIndex)
+	refreshBaseVisuals(targetBaseIndex)
+	broadcastHUD(player)
+	if targetPlayer then broadcastHUD(targetPlayer) end
+	saveData(player.UserId)
+	if targetOwnerId then saveData(targetOwnerId) end
+
+	return true, "Roubado!"
+end
+
+-- Bloquear base
+RF_LockBase.OnServerInvoke = function(player)
+	local data = getPlayerData(player.UserId)
+	if not data or not data.baseIndex then return false, "Erro." end
+
+	local baseIndex = data.baseIndex
+	if isBaseLocked(baseIndex) then
+		local remaining = math.ceil(baseLocks[baseIndex] - tick())
+		return false, "Base já bloqueada! "..remaining.."s restantes."
+	end
+
+	local lockDuration = CONFIG.LOCK_TIME_RELOCK + (data.rebirths * CONFIG.LOCK_TIME_PER_REBIRTH)
+	baseLocks[baseIndex] = tick() + lockDuration
+	setShield(baseIndex, true)
+
+	task.delay(lockDuration, function()
+		setShield(baseIndex, false)
+		local p = Players:GetPlayerByUserId(player.UserId)
+		if p then
+			RE_Notification:FireClient(p, "🔓 Sua base foi desbloqueada!", "info")
+		end
+	end)
+
+	RE_Notification:FireClient(player, "🔒 Base bloqueada por "..lockDuration.."s!", "success")
+	return true, "Bloqueado!"
+end
+
+-- Rebirth
+RF_Rebirth.OnServerInvoke = function(player)
+	local data = getPlayerData(player.UserId)
+	if not data then return false, "Erro." end
+
+	local rebirthCost = 10000 * (2 ^ data.rebirths)
+	if data.cash < rebirthCost then
+		return false, "Precisa de "..formatCash(rebirthCost).." para renascer!"
+	end
+
+	data.cash = 0
+	data.brazilrots = {}
+	data.rebirths += 1
+
+	-- Limpar base visual
+	local base = baseModels[data.baseIndex]
+	if base then
+		local brFolder = base:FindFirstChild("Brazilrots")
+		if brFolder then brFolder:ClearAllChildren() end
+	end
+
+	broadcastHUD(player)
+	RE_Notification:FireClient(player,
+		"🔥 RENASCIMENTO "..data.rebirths.."! +"..(data.rebirths * 10).."% de bônus de renda!", "success")
+	saveData(player.UserId)
+	return true, "Renascido!"
+end
+
+-- Pegar dados
+RF_GetData.OnServerInvoke = function(player)
+	local data = getPlayerData(player.UserId)
+	if not data then return nil end
+	return {
+		cash         = data.cash,
+		cashStr      = formatCash(data.cash),
+		rebirths     = data.rebirths,
+		baseIndex    = data.baseIndex,
+		brazilrots   = data.brazilrots,
+	}
+end
+
+-- ============================================================
+-- RENDA PASSIVA
+-- ============================================================
+local function startIncomeLoop()
+	task.spawn(function()
+		while true do
+			task.wait(1)
+			for userId, data in pairs(playerData) do
+				local total = 0
+				local rebirthBonus = 1 + (data.rebirths * 0.1)
+				for _, br in ipairs(data.brazilrots) do
+					total += br.income * rebirthBonus
+				end
+				if total > 0 then
+					data.cash += total
+					local player = Players:GetPlayerByUserId(userId)
+					if player then
+						broadcastHUD(player)
+					end
+				end
+			end
+		end
+	end)
+end
+
+-- ============================================================
+-- CONVEYOR LOOP
+-- ============================================================
+local function startConveyorLoop()
+	task.spawn(function()
+		while true do
+			refreshConveyor()
+			task.wait(CONFIG.CONVEYOR_REFRESH_TIME)
+		end
+	end)
+end
+
+-- ============================================================
+-- SAVE LOOP
+-- ============================================================
+local function startSaveLoop()
+	task.spawn(function()
+		while true do
+			task.wait(60)
+			for userId, _ in pairs(playerData) do
+				saveData(userId)
+			end
+		end
+	end)
+end
+
+-- ============================================================
+-- ENTRAR/SAIR DO JOGO
+-- ============================================================
+local function onPlayerAdded(player)
+	-- Achar base livre
+	local freeBase = nil
+	for i = 1, CONFIG.NUM_BASES do
+		if not baseOwners[i] then
+			freeBase = i
+			break
+		end
+	end
+
+	if not freeBase then
+		-- Kickar se não houver base
+		player:Kick("Servidor cheio! Tente outro servidor.")
+		return
+	end
+
+	-- Carregar dados
+	local data = loadData(player.UserId)
+	data.baseIndex = freeBase
+	playerData[player.UserId] = data
+	baseOwners[freeBase] = player.UserId
+
+	-- Bloquear base inicial
+	baseLocks[freeBase] = tick() + CONFIG.LOCK_TIME_BASE
+	setShield(freeBase, true)
+	task.delay(CONFIG.LOCK_TIME_BASE, function()
+		setShield(freeBase, false)
+	end)
+
+	-- Teleportar para a base
+	player.CharacterAdded:Connect(function(character)
+		task.wait(1)
+		local base = baseModels[freeBase]
+		if base and character:FindFirstChild("HumanoidRootPart") then
+			local floor = base:FindFirstChild("Floor")
+			if floor then
+				character.HumanoidRootPart.CFrame = CFrame.new(floor.Position + Vector3.new(0, 5, 0))
+			end
+		end
+		refreshBaseVisuals(freeBase)
+		broadcastHUD(player)
+	end)
+
+	if player.Character then
+		task.spawn(function()
+			local base = baseModels[freeBase]
+			task.wait(0.5)
+			if base and player.Character:FindFirstChild("HumanoidRootPart") then
+				local floor = base:FindFirstChild("Floor")
+				if floor then
+					player.Character.HumanoidRootPart.CFrame = CFrame.new(floor.Position + Vector3.new(0, 5, 0))
+				end
+			end
+			refreshBaseVisuals(freeBase)
+			broadcastHUD(player)
+		end)
+	end
+
+	-- GUI local (loading screen via LocalScript abaixo)
+	RE_Notification:FireClient(player, "🇧🇷 Bem-vindo ao Steal a Brazilrot! Base "..freeBase.." é sua!", "success")
+end
+
+local function onPlayerRemoving(player)
+	local data = playerData[player.UserId]
+	if data then
+		saveData(player.UserId)
+		local baseIndex = data.baseIndex
+		if baseIndex then
+			baseOwners[baseIndex] = nil
+			baseLocks[baseIndex] = 0
+			setShield(baseIndex, false)
+			-- Limpar brazilrots da base
+			local base = baseModels[baseIndex]
+			if base then
+				local brFolder = base:FindFirstChild("Brazilrots")
+				if brFolder then brFolder:ClearAllChildren() end
+			end
+		end
+	end
+	playerData[player.UserId] = nil
+end
+
+-- ============================================================
+-- LOCAL SCRIPT (HUD + LOADING SCREEN) - INSERIDO AUTOMATICAMENTE
+-- ============================================================
+local localScriptCode = [[
+-- LOCAL SCRIPT - Inserido automaticamente pelo MainScript
+-- Gerencia HUD, Loading Screen e interações do cliente
+
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+local Remotes = ReplicatedStorage:WaitForChild("BrazilrotRemotes")
+
+local RE_UpdateHUD      = Remotes:WaitForChild("UpdateHUD")
+local RE_Notification   = Remotes:WaitForChild("Notification")
+local RE_ConveyorUpdate = Remotes:WaitForChild("ConveyorUpdate")
+local RF_BuyConveyor    = Remotes:WaitForChild("BuyConveyor")
+local RF_StealBrazilrot = Remotes:WaitForChild("StealBrazilrot")
+local RF_LockBase       = Remotes:WaitForChild("LockBase")
+local RF_Rebirth        = Remotes:WaitForChild("Rebirth")
+local RF_GetData        = Remotes:WaitForChild("GetData")
+
+-- =====================
+-- LOADING SCREEN
+-- =====================
+local loadingGui = Instance.new("ScreenGui")
+loadingGui.Name = "LoadingGui"
+loadingGui.ResetOnSpawn = false
+loadingGui.DisplayOrder = 100
+loadingGui.Parent = playerGui
+
+local loadingBG = Instance.new("Frame")
+loadingBG.Size = UDim2.new(1,0,1,0)
+loadingBG.BackgroundColor3 = Color3.fromRGB(10, 10, 20)
+loadingBG.BorderSizePixel = 0
+loadingBG.Parent = loadingGui
+
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Size = UDim2.new(0.8, 0, 0.2, 0)
+titleLabel.Position = UDim2.new(0.1, 0, 0.25, 0)
+titleLabel.BackgroundTransparency = 1
+titleLabel.Text = "🇧🇷 STEAL A BRAZILROT 🇧🇷"
+titleLabel.TextColor3 = Color3.fromRGB(0, 220, 100)
+titleLabel.TextScaled = true
+titleLabel.Font = Enum.Font.GothamBold
+titleLabel.Parent = loadingBG
+
+local subLabel = Instance.new("TextLabel")
+subLabel.Size = UDim2.new(0.6, 0, 0.08, 0)
+subLabel.Position = UDim2.new(0.2, 0, 0.45, 0)
+subLabel.BackgroundTransparency = 1
+subLabel.Text = "Carregando o caos brasileiro..."
+subLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+subLabel.TextScaled = true
+subLabel.Font = Enum.Font.Gotham
+subLabel.Parent = loadingBG
+
+-- Barra de progresso
+local barBG = Instance.new("Frame")
+barBG.Size = UDim2.new(0.6, 0, 0.04, 0)
+barBG.Position = UDim2.new(0.2, 0, 0.58, 0)
+barBG.BackgroundColor3 = Color3.fromRGB(40, 40, 60)
+barBG.BorderSizePixel = 0
+barBG.Parent = loadingBG
+Instance.new("UICorner", barBG).CornerRadius = UDim.new(1, 0)
+
+local barFill = Instance.new("Frame")
+barFill.Size = UDim2.new(0, 0, 1, 0)
+barFill.BackgroundColor3 = Color3.fromRGB(0, 220, 100)
+barFill.BorderSizePixel = 0
+barFill.Parent = barBG
+Instance.new("UICorner", barFill).CornerRadius = UDim.new(1, 0)
+
+local loadingDots = {".", "..", "..."}
+local dotIndex = 1
+local tips = {
+	"💡 Dica: Brainrots raros geram muito mais grana!",
+	"💡 Dica: Use o escudo logo ao entrar!",
+	"💡 Dica: Renasça para ganhar bônus de renda!",
+	"💡 Dica: Roube quando o escudo do inimigo acabar!",
+	"💡 Dica: Brainrot Supremo gera R$60K/s!",
+}
+local tipLabel = Instance.new("TextLabel")
+tipLabel.Size = UDim2.new(0.7, 0, 0.06, 0)
+tipLabel.Position = UDim2.new(0.15, 0, 0.7, 0)
+tipLabel.BackgroundTransparency = 1
+tipLabel.Text = tips[math.random(1, #tips)]
+tipLabel.TextColor3 = Color3.fromRGB(150, 200, 255)
+tipLabel.TextScaled = true
+tipLabel.Font = Enum.Font.Gotham
+tipLabel.Parent = loadingBG
+
+-- Animação da barra em 3 segundos
+local startTime = tick()
+local duration = 3
+
+task.spawn(function()
+	while tick() - startTime < duration do
+		local progress = (tick() - startTime) / duration
+		barFill.Size = UDim2.new(progress, 0, 1, 0)
+		dotIndex = (dotIndex % 3) + 1
+		subLabel.Text = "Carregando o caos brasileiro" .. loadingDots[dotIndex]
+		task.wait(0.1)
+	end
+	barFill.Size = UDim2.new(1, 0, 1, 0)
+	subLabel.Text = "Pronto! Bem-vindo ao Brasil! 🇧🇷"
+	task.wait(0.5)
+	-- Fade out
+	local tween = TweenService:Create(loadingBG, TweenInfo.new(0.8, Enum.EasingStyle.Quad), {BackgroundTransparency = 1})
+	tween:Play()
+	for _, child in ipairs(loadingBG:GetDescendants()) do
+		if child:IsA("TextLabel") or child:IsA("Frame") then
+			TweenService:Create(child, TweenInfo.new(0.8), {BackgroundTransparency = 1, TextTransparency = 1}):Play()
+		end
+	end
+	task.wait(0.9)
+	loadingGui:Destroy()
+end)
+
+-- =====================
+-- HUD PRINCIPAL
+-- =====================
+local hudGui = Instance.new("ScreenGui")
+hudGui.Name = "HUD"
+hudGui.ResetOnSpawn = false
+hudGui.DisplayOrder = 5
+hudGui.Parent = playerGui
+
+-- Painel de dinheiro (topo esquerdo)
+local cashPanel = Instance.new("Frame")
+cashPanel.Size = UDim2.new(0, 250, 0, 80)
+cashPanel.Position = UDim2.new(0, 10, 0, 10)
+cashPanel.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
+cashPanel.BackgroundTransparency = 0.3
+cashPanel.BorderSizePixel = 0
+cashPanel.Parent = hudGui
+Instance.new("UICorner", cashPanel).CornerRadius = UDim.new(0, 12)
+
+local cashLabel = Instance.new("TextLabel")
+cashLabel.Size = UDim2.new(1, 0, 0.55, 0)
+cashLabel.BackgroundTransparency = 1
+cashLabel.Text = "💰 R$ 100"
+cashLabel.TextColor3 = Color3.fromRGB(0, 255, 120)
+cashLabel.TextScaled = true
+cashLabel.Font = Enum.Font.GothamBold
+cashLabel.Parent = cashPanel
+
+local incomeLabel = Instance.new("TextLabel")
+incomeLabel.Size = UDim2.new(1, 0, 0.35, 0)
+incomeLabel.Position = UDim2.new(0, 0, 0.55, 0)
+incomeLabel.BackgroundTransparency = 1
+incomeLabel.Text = "📈 0/s"
+incomeLabel.TextColor3 = Color3.fromRGB(150, 255, 150)
+incomeLabel.TextScaled = true
+incomeLabel.Font = Enum.Font.Gotham
+incomeLabel.Parent = cashPanel
+
+-- Painel de rebirths (topo direito)
+local rebirthPanel = Instance.new("Frame")
+rebirthPanel.Size = UDim2.new(0, 180, 0, 60)
+rebirthPanel.Position = UDim2.new(1, -190, 0, 10)
+rebirthPanel.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
+rebirthPanel.BackgroundTransparency = 0.3
+rebirthPanel.BorderSizePixel = 0
+rebirthPanel.Parent = hudGui
+Instance.new("UICorner", rebirthPanel).CornerRadius = UDim.new(0, 12)
+
+local rebirthLabel = Instance.new("TextLabel")
+rebirthLabel.Size = UDim2.new(1, 0, 1, 0)
+rebirthLabel.BackgroundTransparency = 1
+rebirthLabel.Text = "🔥 Rebirth: 0"
+rebirthLabel.TextColor3 = Color3.fromRGB(255, 150, 0)
+rebirthLabel.TextScaled = true
+rebirthLabel.Font = Enum.Font.GothamBold
+rebirthLabel.Parent = rebirthPanel
+
+-- Botões de ação (baixo centro)
+local buttonFrame = Instance.new("Frame")
+buttonFrame.Size = UDim2.new(0, 500, 0, 60)
+buttonFrame.Position = UDim2.new(0.5, -250, 1, -80)
+buttonFrame.BackgroundTransparency = 1
+buttonFrame.Parent = hudGui
+
+local function makeButton(parent, text, color, xPos, callback)
+	local btn = Instance.new("TextButton")
+	btn.Size = UDim2.new(0, 155, 0, 55)
+	btn.Position = UDim2.new(0, xPos, 0, 0)
+	btn.BackgroundColor3 = color
+	btn.BorderSizePixel = 0
+	btn.Text = text
+	btn.TextColor3 = Color3.new(1,1,1)
+	btn.TextScaled = true
+	btn.Font = Enum.Font.GothamBold
+	btn.Parent = parent
+	Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 10)
+
+	btn.MouseButton1Click:Connect(function()
+		callback()
+	end)
+	-- Mobile touch
+	btn.TouchTap:Connect(function()
+		callback()
+	end)
+	return btn
+end
+
+local cooldowns = {}
+local function withCooldown(key, time, fn)
+	if cooldowns[key] and tick() < cooldowns[key] then return end
+	cooldowns[key] = tick() + time
+	fn()
+end
+
+makeButton(buttonFrame, "🛒 Comprar", Color3.fromRGB(0, 150, 60), 0, function()
+	withCooldown("buy", 1, function()
+		local ok, msg = RF_BuyConveyor:InvokeServer()
+	end)
+end)
+
+makeButton(buttonFrame, "🔒 Bloquear", Color3.fromRGB(0, 100, 200), 170, function()
+	withCooldown("lock", 1, function()
+		local ok, msg = RF_LockBase:InvokeServer()
+	end)
+end)
+
+makeButton(buttonFrame, "🔥 Renascer", Color3.fromRGB(200, 80, 0), 340, function()
+	withCooldown("rebirth", 1, function()
+		local ok, msg = RF_Rebirth:InvokeServer()
+	end)
+end)
+
+-- Painel do conveyor (info do brazilrot atual)
+local conveyorPanel = Instance.new("Frame")
+conveyorPanel.Size = UDim2.new(0, 260, 0, 90)
+conveyorPanel.Position = UDim2.new(0.5, -130, 0, 10)
+conveyorPanel.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
+conveyorPanel.BackgroundTransparency = 0.3
+conveyorPanel.BorderSizePixel = 0
+conveyorPanel.Parent = hudGui
+Instance.new("UICorner", conveyorPanel).CornerRadius = UDim.new(0, 12)
+
+local conveyorNameLabel = Instance.new("TextLabel")
+conveyorNameLabel.Size = UDim2.new(1, 0, 0.5, 0)
+conveyorNameLabel.BackgroundTransparency = 1
+conveyorNameLabel.Text = "🛒 Aguardando..."
+conveyorNameLabel.TextColor3 = Color3.fromRGB(255, 220, 0)
+conveyorNameLabel.TextScaled = true
+conveyorNameLabel.Font = Enum.Font.GothamBold
+conveyorNameLabel.Parent = conveyorPanel
+
+local conveyorPriceLabel = Instance.new("TextLabel")
+conveyorPriceLabel.Size = UDim2.new(1, 0, 0.4, 0)
+conveyorPriceLabel.Position = UDim2.new(0, 0, 0.5, 0)
+conveyorPriceLabel.BackgroundTransparency = 1
+conveyorPriceLabel.Text = "Preço: --"
+conveyorPriceLabel.TextColor3 = Color3.fromRGB(150, 255, 150)
+conveyorPriceLabel.TextScaled = true
+conveyorPriceLabel.Font = Enum.Font.Gotham
+conveyorPriceLabel.Parent = conveyorPanel
+
+-- =====================
+-- SISTEMA DE NOTIFICAÇÕES
+-- =====================
+local notifQueue = {}
+local notifShowing = false
+
+local notifColors = {
+	success = Color3.fromRGB(0, 200, 80),
+	danger  = Color3.fromRGB(220, 50, 50),
+	warning = Color3.fromRGB(255, 160, 0),
+	info    = Color3.fromRGB(0, 150, 255),
+}
+
+local function showNextNotif()
+	if notifShowing or #notifQueue == 0 then return end
+	notifShowing = true
+
+	local notifData = table.remove(notifQueue, 1)
+	local color = notifColors[notifData.type] or notifColors.info
+
+	local notif = Instance.new("Frame")
+	notif.Size = UDim2.new(0, 320, 0, 60)
+	notif.Position = UDim2.new(1, 10, 0.5, -30)
+	notif.BackgroundColor3 = color
+	notif.BorderSizePixel = 0
+	notif.Parent = hudGui
+	Instance.new("UICorner", notif).CornerRadius = UDim.new(0, 12)
+
+	local notifText = Instance.new("TextLabel")
+	notifText.Size = UDim2.new(1, -10, 1, 0)
+	notifText.Position = UDim2.new(0, 5, 0, 0)
+	notifText.BackgroundTransparency = 1
+	notifText.Text = notifData.msg
+	notifText.TextColor3 = Color3.new(1,1,1)
+	notifText.TextScaled = true
+	notifText.Font = Enum.Font.GothamBold
+	notifText.TextWrapped = true
+	notifText.Parent = notif
+
+	-- Slide in
+	TweenService:Create(notif, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {
+		Position = UDim2.new(1, -330, 0.5, -30)
+	}):Play()
+
+	task.wait(3)
+
+	-- Slide out
+	TweenService:Create(notif, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {
+		Position = UDim2.new(1, 10, 0.5, -30)
+	}):Play()
+	task.wait(0.4)
+	notif:Destroy()
+	notifShowing = false
+	showNextNotif()
+end
+
+RE_Notification.OnClientEvent:Connect(function(msg, notifType)
+	table.insert(notifQueue, { msg = msg, type = notifType or "info" })
+	task.spawn(showNextNotif)
+end)
+
+-- =====================
+-- ATUALIZAR HUD
+-- =====================
+RE_UpdateHUD.OnClientEvent:Connect(function(data)
+	cashLabel.Text = "💰 R$ " .. data.cashStr
+	incomeLabel.Text = "📈 " .. data.incomeStr
+	rebirthLabel.Text = "🔥 Rebirth: " .. data.rebirths
+end)
+
+-- =====================
+-- ATUALIZAR CONVEYOR
+-- =====================
+RE_ConveyorUpdate.OnClientEvent:Connect(function(data)
+	conveyorNameLabel.Text = "🧠 " .. data.name
+	conveyorPriceLabel.Text = "💰 " .. data.priceStr .. " | " .. data.rarity
+end)
+]]
+
+-- Inserir LocalScript automaticamente no StarterPlayerScripts
+local localScript = Instance.new("LocalScript")
+localScript.Name = "BrazilrotClient"
+localScript.Source = localScriptCode
+localScript.Parent = game:GetService("StarterPlayer"):WaitForChild("StarterPlayerScripts")
+
+-- ============================================================
+-- INICIALIZAÇÃO PRINCIPAL
+-- ============================================================
+print("[StealABrazilrot] Gerando mapa...")
+generateMap()
+print("[StealABrazilrot] Mapa gerado! Iniciando sistemas...")
+
+-- Pegar referência ao platform do conveyor
+task.wait(0.1)
+local conveyorModel = workspace:FindFirstChild("Conveyor")
+if conveyorModel then
+	conveyorPlatform = conveyorModel:FindFirstChild("Platform")
+end
+
+Players.PlayerAdded:Connect(onPlayerAdded)
+Players.PlayerRemoving:Connect(onPlayerRemoving)
+
+-- Jogadores já conectados (Studio test)
+for _, player in ipairs(Players:GetPlayers()) do
+	task.spawn(onPlayerAdded, player)
+end
+
+startIncomeLoop()
+startConveyorLoop()
+startSaveLoop()
+
+print("[StealABrazilrot] ✅ Todos os sistemas iniciados! Bem-vindo ao caos brasileiro!")
