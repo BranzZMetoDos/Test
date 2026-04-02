@@ -1,0 +1,431 @@
+-- BranzZ Auto Brainrots v5.0
+
+local Players      = game:GetService("Players")
+local RunService   = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local UIS          = game:GetService("UserInputService")
+local Workspace    = game:GetService("Workspace")
+
+local player    = Players.LocalPlayer
+local playerGui = player.PlayerGui
+
+local State = {
+    AutoCelestial = false,
+    AutoSecret    = false,
+    AutoInfinity  = false,
+    InfJump       = false,
+}
+
+-- SPAWN
+local spawnCFrame = nil
+local function updateSpawn()
+    local char = player.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if hrp then spawnCFrame = hrp.CFrame end
+end
+player.CharacterAdded:Connect(function() task.wait(1.5) updateSpawn() end)
+updateSpawn()
+
+-- LIMPA GUI ANTIGA
+if playerGui:FindFirstChild("BranzZGui") then
+    playerGui.BranzZGui:Destroy()
+end
+
+-- SCREENUI
+local SG = Instance.new("ScreenGui")
+SG.Name = "BranzZGui"
+SG.ResetOnSpawn = false
+SG.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+SG.Parent = playerGui
+
+-- MAIN FRAME
+local MF = Instance.new("Frame")
+MF.Size = UDim2.new(0,272,0,310)
+MF.Position = UDim2.new(0.5,-136,0.5,-155)
+MF.BackgroundColor3 = Color3.fromRGB(16,16,22)
+MF.BorderSizePixel = 0
+MF.ClipsDescendants = true
+MF.Parent = SG
+Instance.new("UICorner",MF).CornerRadius = UDim.new(0,22)
+local mfS = Instance.new("UIStroke",MF)
+mfS.Color = Color3.fromRGB(55,55,75); mfS.Thickness = 1.2
+local mfG = Instance.new("UIGradient",MF)
+mfG.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0,Color3.fromRGB(24,24,36)),
+    ColorSequenceKeypoint.new(1,Color3.fromRGB(13,13,19)),
+})
+mfG.Rotation = 130
+
+-- TOPBAR
+local TB = Instance.new("Frame")
+TB.Size = UDim2.new(1,0,0,50)
+TB.BackgroundColor3 = Color3.fromRGB(26,26,38)
+TB.BorderSizePixel = 0; TB.ZIndex = 3; TB.Parent = MF
+Instance.new("UICorner",TB).CornerRadius = UDim.new(0,22)
+local TBF = Instance.new("Frame")
+TBF.Size = UDim2.new(1,0,0,22); TBF.Position = UDim2.new(0,0,1,-22)
+TBF.BackgroundColor3 = Color3.fromRGB(26,26,38)
+TBF.BorderSizePixel = 0; TBF.ZIndex = 3; TBF.Parent = TB
+
+local TitleL = Instance.new("TextLabel")
+TitleL.Size = UDim2.new(1,-55,0,22); TitleL.Position = UDim2.new(0,15,0,7)
+TitleL.BackgroundTransparency = 1; TitleL.Text = "BranzZ Auto Brainrots"
+TitleL.TextColor3 = Color3.fromRGB(245,245,255); TitleL.TextSize = 13
+TitleL.Font = Enum.Font.GothamBold
+TitleL.TextXAlignment = Enum.TextXAlignment.Left
+TitleL.ZIndex = 4; TitleL.Parent = TB
+
+local StatusL = Instance.new("TextLabel")
+StatusL.Size = UDim2.new(1,-55,0,13); StatusL.Position = UDim2.new(0,15,0,31)
+StatusL.BackgroundTransparency = 1; StatusL.Text = "● Pronto"
+StatusL.TextColor3 = Color3.fromRGB(80,220,120); StatusL.TextSize = 10
+StatusL.Font = Enum.Font.Gotham
+StatusL.TextXAlignment = Enum.TextXAlignment.Left
+StatusL.ZIndex = 4; StatusL.Parent = TB
+
+local function setStatus(t,c)
+    StatusL.Text = "● "..t
+    StatusL.TextColor3 = c or Color3.fromRGB(80,220,120)
+end
+
+local CloseB = Instance.new("TextButton")
+CloseB.Size = UDim2.new(0,27,0,27); CloseB.Position = UDim2.new(1,-38,0.5,-13)
+CloseB.BackgroundColor3 = Color3.fromRGB(255,59,48); CloseB.Text = "✕"
+CloseB.TextColor3 = Color3.fromRGB(255,255,255); CloseB.TextSize = 12
+CloseB.Font = Enum.Font.GothamBold; CloseB.BorderSizePixel = 0
+CloseB.ZIndex = 5; CloseB.Parent = TB
+Instance.new("UICorner",CloseB).CornerRadius = UDim.new(1,0)
+CloseB.MouseButton1Click:Connect(function() SG:Destroy() end)
+
+-- CONTENT
+local CT = Instance.new("Frame")
+CT.Size = UDim2.new(1,0,1,-54); CT.Position = UDim2.new(0,0,0,54)
+CT.BackgroundTransparency = 1; CT.Parent = MF
+local ULL = Instance.new("UIListLayout",CT)
+ULL.Padding = UDim.new(0,7)
+ULL.HorizontalAlignment = Enum.HorizontalAlignment.Center
+ULL.SortOrder = Enum.SortOrder.LayoutOrder
+local UPP = Instance.new("UIPadding",CT)
+UPP.PaddingTop = UDim.new(0,10)
+UPP.PaddingLeft = UDim.new(0,11)
+UPP.PaddingRight = UDim.new(0,11)
+
+-- CARD TOGGLE
+local function createCard(icon,title,desc,accent,order,cb)
+    local Card = Instance.new("Frame")
+    Card.Size = UDim2.new(1,0,0,58)
+    Card.BackgroundColor3 = Color3.fromRGB(26,26,38)
+    Card.BorderSizePixel = 0; Card.LayoutOrder = order; Card.Parent = CT
+    Instance.new("UICorner",Card).CornerRadius = UDim.new(0,14)
+
+    local Pill = Instance.new("Frame")
+    Pill.Size = UDim2.new(0,36,0,36); Pill.Position = UDim2.new(0,10,0.5,-18)
+    Pill.BackgroundColor3 = accent; Pill.BackgroundTransparency = 0.75
+    Pill.BorderSizePixel = 0; Pill.Parent = Card
+    Instance.new("UICorner",Pill).CornerRadius = UDim.new(0,10)
+    local IL = Instance.new("TextLabel",Pill)
+    IL.Size = UDim2.new(1,0,1,0); IL.BackgroundTransparency = 1
+    IL.Text = icon; IL.TextSize = 18; IL.Font = Enum.Font.GothamBold
+    IL.TextColor3 = accent
+
+    local TL = Instance.new("TextLabel",Card)
+    TL.Size = UDim2.new(1,-110,0,20); TL.Position = UDim2.new(0,54,0,10)
+    TL.BackgroundTransparency = 1; TL.Text = title
+    TL.TextColor3 = Color3.fromRGB(238,238,255); TL.TextSize = 12
+    TL.Font = Enum.Font.GothamBold
+    TL.TextXAlignment = Enum.TextXAlignment.Left
+
+    local DL = Instance.new("TextLabel",Card)
+    DL.Size = UDim2.new(1,-110,0,14); DL.Position = UDim2.new(0,54,0,31)
+    DL.BackgroundTransparency = 1; DL.Text = desc
+    DL.TextColor3 = Color3.fromRGB(95,95,125); DL.TextSize = 9
+    DL.Font = Enum.Font.Gotham
+    DL.TextXAlignment = Enum.TextXAlignment.Left
+
+    local Track = Instance.new("Frame",Card)
+    Track.Size = UDim2.new(0,46,0,27); Track.Position = UDim2.new(1,-56,0.5,-13)
+    Track.BackgroundColor3 = Color3.fromRGB(55,55,72); Track.BorderSizePixel = 0
+    Instance.new("UICorner",Track).CornerRadius = UDim.new(1,0)
+
+    local Thumb = Instance.new("Frame",Track)
+    Thumb.Size = UDim2.new(0,21,0,21); Thumb.Position = UDim2.new(0,3,0.5,-10)
+    Thumb.BackgroundColor3 = Color3.fromRGB(255,255,255); Thumb.BorderSizePixel = 0
+    Instance.new("UICorner",Thumb).CornerRadius = UDim.new(1,0)
+
+    local isOn = false
+    local ti = TweenInfo.new(0.18,Enum.EasingStyle.Quart,Enum.EasingDirection.Out)
+    local function setOn(v)
+        isOn = v
+        if isOn then
+            TweenService:Create(Track,ti,{BackgroundColor3=accent}):Play()
+            TweenService:Create(Thumb,ti,{Position=UDim2.new(0,22,0.5,-10)}):Play()
+        else
+            TweenService:Create(Track,ti,{BackgroundColor3=Color3.fromRGB(55,55,72)}):Play()
+            TweenService:Create(Thumb,ti,{Position=UDim2.new(0,3,0.5,-10)}):Play()
+        end
+        if cb then cb(isOn) end
+    end
+    local HB = Instance.new("TextButton",Card)
+    HB.Size = UDim2.new(1,0,1,0); HB.BackgroundTransparency = 1; HB.Text = ""
+    HB.MouseButton1Click:Connect(function() setOn(not isOn) end)
+end
+
+createCard("⭐","Auto Celestial","Coleta somente Celestial",Color3.fromRGB(255,210,50),1,function(v) State.AutoCelestial=v end)
+createCard("🔮","Auto Secret",  "Coleta somente Secretos", Color3.fromRGB(180,90,255),2,function(v) State.AutoSecret=v    end)
+createCard("♾", "Auto Infinity","Coleta somente Infinity", Color3.fromRGB(40,200,255),3,function(v) State.AutoInfinity=v  end)
+createCard("⚡","InfJump+Wall", "Jump inf | Speed 140",    Color3.fromRGB(50,230,130),4,function(v) State.InfJump=v       end)
+
+-- ARRASTAR
+local drag,dS,fS = false,nil,nil
+TB.InputBegan:Connect(function(i)
+    if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
+        drag=true; dS=i.Position; fS=MF.Position
+    end
+end)
+TB.InputEnded:Connect(function(i)
+    if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then drag=false end
+end)
+UIS.InputChanged:Connect(function(i)
+    if drag and (i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch) then
+        local d=i.Position-dS
+        MF.Position=UDim2.new(fS.X.Scale,fS.X.Offset+d.X,fS.Y.Scale,fS.Y.Offset+d.Y)
+    end
+end)
+
+-- ESP
+local espPool={}
+local function clearESP()
+    for _,b in pairs(espPool) do pcall(function() b:Destroy() end) end; espPool={}
+end
+local function addESP(part,color,label)
+    if not part or not part.Parent then return end
+    local bb=Instance.new("BillboardGui")
+    bb.Size=UDim2.new(0,120,0,28); bb.AlwaysOnTop=true
+    bb.StudsOffset=Vector3.new(0,4,0); bb.Adornee=part; bb.Parent=Workspace
+    local bg=Instance.new("Frame",bb)
+    bg.Size=UDim2.new(1,0,1,0); bg.BackgroundColor3=Color3.fromRGB(0,0,0)
+    bg.BackgroundTransparency=0.4; bg.BorderSizePixel=0
+    Instance.new("UICorner",bg).CornerRadius=UDim.new(0,7)
+    local st=Instance.new("UIStroke",bg); st.Color=color; st.Thickness=1.5
+    local lb=Instance.new("TextLabel",bg)
+    lb.Size=UDim2.new(1,0,1,0); lb.BackgroundTransparency=1
+    lb.Text=label; lb.TextColor3=color; lb.TextSize=11; lb.Font=Enum.Font.GothamBold
+    table.insert(espPool,bb)
+end
+
+-- LER RARIDADE
+local function getRarity(model)
+    for _,obj in pairs(model:GetDescendants()) do
+        if obj.Name=="CharRarity" then
+            if obj:IsA("TextLabel") or obj:IsA("TextBox") then return obj.Text
+            elseif obj:IsA("StringValue") then return obj.Value end
+        end
+    end
+    return nil
+end
+
+-- PEGAR QUALQUER PART DO MODEL
+local function getAnyPart(model)
+    if model.PrimaryPart then return model.PrimaryPart end
+    for _,p in pairs(model:GetDescendants()) do
+        if p:IsA("BasePart") then return p end
+    end
+    return nil
+end
+
+-- =====================================================
+-- TP IMEDIATO SEM CONDIÇÃO DE DISTÂNCIA
+-- Seta CFrame direto, sem checar distância nenhuma
+-- =====================================================
+local function teleportNow(part)
+    local char = player.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    -- TP DIRETO. Sem if. Sem checar distância. Só seta.
+    hrp.CFrame = CFrame.new(part.Position.X, part.Position.Y + 3, part.Position.Z)
+    task.wait(0.1)
+end
+
+local function goSpawn()
+    if not spawnCFrame then return end
+    local char = player.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if hrp then hrp.CFrame = spawnCFrame end
+    task.wait(0.1)
+end
+
+-- =====================================================
+-- FORÇAR PROXIMITY PROMPT SEM PRECISAR ESTAR PERTO
+-- =====================================================
+local function forcePrompts(model, root)
+    local char = player.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    for _, obj in pairs(model:GetDescendants()) do
+        if obj:IsA("ProximityPrompt") then
+            pcall(function()
+                local orig = obj.MaxActivationDistance
+                -- Abre distância pra 9999 ANTES de qualquer coisa
+                obj.MaxActivationDistance = 9999
+                obj.Enabled = true
+
+                -- TP na part exata do prompt
+                local pp = obj.Parent
+                if pp and pp:IsA("BasePart") then
+                    hrp.CFrame = CFrame.new(pp.Position.X, pp.Position.Y+3, pp.Position.Z)
+                end
+                task.wait(0.05)
+
+                -- Dispara
+                fireproximityprompt(obj)
+                task.wait(0.05)
+
+                -- Se precisar segurar
+                if obj.HoldDuration > 0 then
+                    holdproximityprompt(obj)
+                    task.wait(obj.HoldDuration + 0.1)
+                end
+
+                obj.MaxActivationDistance = orig
+            end)
+        end
+    end
+end
+
+-- =====================================================
+-- LOOP DE COLETA
+-- Sem NENHUMA checagem de distância
+-- Só lê a pasta, acha o model com a raridade,
+-- TP direto, interage, volta pro spawn. Fim.
+-- =====================================================
+local function collect(targetRarity, espColor, activeCheck)
+    local folder = Workspace:FindFirstChild("ClientBrainrotVisuals")
+    if not folder then
+        setStatus("Pasta nao encontrada!", Color3.fromRGB(255,80,80))
+        return
+    end
+
+    clearESP()
+    local count = 0
+
+    for _, model in pairs(folder:GetChildren()) do
+        -- Para o loop se toggle foi desligado
+        if not activeCheck() then
+            clearESP()
+            setStatus("Pronto", Color3.fromRGB(80,220,120))
+            return
+        end
+
+        if not model or not model.Parent then
+            task.wait(0); continue
+        end
+
+        local rarity = getRarity(model)
+
+        if rarity and rarity:lower():find(targetRarity:lower()) then
+            local root = getAnyPart(model)
+
+            if root and root.Parent then
+                -- ESP
+                addESP(root, espColor, "⭐ "..rarity)
+                setStatus(rarity.." > "..count, espColor)
+
+                -- ===================================
+                -- TP DIRETO. ZERO CHECAGEM.
+                -- ===================================
+                teleportNow(root)
+
+                -- INTERAGE COM PROMPT
+                forcePrompts(model, root)
+
+                count += 1
+                task.wait(0.4)
+
+                -- VOLTA PRO SPAWN
+                goSpawn()
+            end
+        end
+
+        task.wait(0)
+    end
+
+    clearESP()
+    setStatus("Coletados: "..count, espColor)
+end
+
+-- =====================================================
+-- INFJUMP + WALLHACK
+-- =====================================================
+local jumpConn = nil
+
+RunService.Heartbeat:Connect(function()
+    if not State.InfJump then
+        if jumpConn then jumpConn:Disconnect(); jumpConn = nil end
+        return
+    end
+
+    local char = player.Character
+    if not char then return end
+    local hum = char:FindFirstChild("Humanoid")
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hum or not hrp then return end
+
+    -- Speed e jump power constantes
+    hum.WalkSpeed = 140
+    hum.JumpPower = 130
+
+    -- Wallhack: sem colisão
+    for _, p in pairs(char:GetDescendants()) do
+        if p:IsA("BasePart") then p.CanCollide = false end
+    end
+
+    -- Pulo infinito: mantém estado jumping enquanto no ar
+    local st = hum:GetState()
+    if st == Enum.HumanoidStateType.Freefall then
+        hum:ChangeState(Enum.HumanoidStateType.Jumping)
+    end
+end)
+
+-- PULO COM ESPAÇO INFINITO
+UIS.JumpRequest:Connect(function()
+    if not State.InfJump then return end
+    local char = player.Character
+    if not char then return end
+    local hum = char:FindFirstChild("Humanoid")
+    if hum then hum:ChangeState(Enum.HumanoidStateType.Jumping) end
+end)
+
+-- =====================================================
+-- LOOPS
+-- =====================================================
+task.spawn(function()
+    while task.wait(0.5) do
+        if State.AutoCelestial then
+            collect("Celestial", Color3.fromRGB(255,210,50), function() return State.AutoCelestial end)
+        end
+    end
+end)
+
+task.spawn(function()
+    while task.wait(0.5) do
+        if State.AutoSecret then
+            collect("Secret",  Color3.fromRGB(180,90,255), function() return State.AutoSecret end)
+            collect("Secreto", Color3.fromRGB(180,90,255), function() return State.AutoSecret end)
+        end
+    end
+end)
+
+task.spawn(function()
+    while task.wait(0.5) do
+        if State.AutoInfinity then
+            collect("Infinity", Color3.fromRGB(40,200,255), function() return State.AutoInfinity end)
+        end
+    end
+end)
+
+print("✅ BranzZ Auto Brainrots v5.0 OK")
