@@ -1,0 +1,972 @@
+--[[
+    🇧🇷 STEAL A BRAZILROT — GERADOR ÚNICO (LocalScript)
+    
+    COMO USAR NO STUDIO LITE:
+    1. Abra o Studio Lite
+    2. Crie um novo LocalScript em qualquer lugar
+    3. Cole TODO esse código
+    4. Clique em "Run" / "Rodar"
+    5. Pronto! Tudo será criado automaticamente.
+    
+    ⚠️ Execute apenas UMA vez.
+    ⚠️ Depois de rodar, pode deletar este script.
+]]
+
+local RunService    = game:GetService("RunService")
+local Players       = game:GetService("Players")
+local RS            = game:GetService("ReplicatedStorage")
+local SS            = game:GetService("ServerScriptService")
+local SG            = game:GetService("StarterGui")
+local SP            = game:GetService("StarterPlayer")
+local WS            = game:GetService("Workspace")
+local Lighting      = game:GetService("Lighting")
+
+-- Só roda no cliente (Studio Lite executa LocalScript normalmente)
+local player = Players.LocalPlayer
+
+print("🇧🇷 Iniciando geração do Steal a Brazilrot...")
+
+-- ============================================================
+-- UTILITÁRIO
+-- ============================================================
+local function pasta(nome, pai)
+    local f = Instance.new("Folder")
+    f.Name   = nome
+    f.Parent = pai
+    return f
+end
+
+local function script_(nome, tipo, src, pai)
+    local s
+    if tipo == "local"  then s = Instance.new("LocalScript")
+    elseif tipo == "module" then s = Instance.new("ModuleScript")
+    else s = Instance.new("Script") end
+    s.Name    = nome
+    s.Source  = src
+    s.Parent  = pai
+    return s
+end
+
+local function part(props, pai)
+    local p = Instance.new("Part")
+    for k,v in pairs(props) do p[k] = v end
+    p.Parent = pai
+    return p
+end
+
+local function remoto(nome, pai)
+    local r = Instance.new("RemoteEvent")
+    r.Name   = nome
+    r.Parent = pai
+    return r
+end
+
+local function remotofn(nome, pai)
+    local r = Instance.new("RemoteFunction")
+    r.Name   = nome
+    r.Parent = pai
+    return r
+end
+
+-- ============================================================
+-- ESTRUTURA DE PASTAS
+-- ============================================================
+-- Limpar instâncias antigas se existirem
+for _, nome in ipairs({"Brazilrot"}) do
+    local velho = RS:FindFirstChild(nome)
+    if velho then velho:Destroy() end
+    local velho2 = SS:FindFirstChild(nome)
+    if velho2 then velho2:Destroy() end
+end
+
+local pastaRS  = pasta("Brazilrot",  RS)
+local pastaEv  = pasta("Eventos",    pastaRS)
+local pastaFn  = pasta("Funcoes",    pastaRS)
+local pastaSS  = pasta("Brazilrot",  SS)
+local pastaSPS = SP:WaitForChild("StarterPlayerScripts")
+
+-- ============================================================
+-- REMOTE EVENTS & FUNCTIONS
+-- ============================================================
+for _, nome in ipairs({
+    "ComprarBrazilrot","RoubarBrazilrot","ProtegerBase",
+    "RealizarRebirth","AtualizarHUD","NotificarJogador",
+    "SincronizarLoja","AtualizarIndex","AntiCheatAlerta"
+}) do remoto(nome, pastaEv) end
+
+remotofn("GetDadosJogador",    pastaFn)
+remotofn("GetListaBrazilrots", pastaFn)
+
+print("  ✅ RemoteEvents criados")
+
+-- ============================================================
+-- MODULE: CONFIG
+-- ============================================================
+script_("Config","module",[[
+local Config = {}
+Config.VERSAO              = "1.0.0"
+Config.MOEDA_SIMBOLO       = "R$"
+Config.TICK_RENDA          = 1
+Config.PROTECAO_INICIAL    = 30
+Config.PROTECAO_BASE       = 60
+Config.MAX_BASES           = 8
+Config.ESTEIRA_INTERVALO   = 12
+Config.LOJA_DISPONIVEL     = false
+Config.MAX_BRAZILROTS      = 50
+Config.REBIRTH_BONUS       = 0.15
+Config.ANTICHEAT_MAX_GAIN  = 9999999
+Config.ANTICHEAT_TP_DIST   = 300
+Config.REBIRTH_REQUISITOS  = {
+    [1]={dinheiro=1e6,   brazilrots=5},
+    [2]={dinheiro=10e6,  brazilrots=10},
+    [3]={dinheiro=100e6, brazilrots=15},
+    [4]={dinheiro=1e9,   brazilrots=20},
+    [5]={dinheiro=10e9,  brazilrots=25},
+}
+Config.COR_RARIDADE = {
+    ["Comum"]        = Color3.fromRGB(180,180,180),
+    ["Incomum"]      = Color3.fromRGB(80,200,80),
+    ["Raro"]         = Color3.fromRGB(80,120,255),
+    ["Épico"]        = Color3.fromRGB(180,60,255),
+    ["Lendário"]     = Color3.fromRGB(255,180,0),
+    ["Mítico"]       = Color3.fromRGB(255,60,60),
+    ["Secreto"]      = Color3.fromRGB(255,20,150),
+    ["Brainrot God"] = Color3.fromRGB(255,215,0),
+}
+return Config
+]], pastaRS)
+
+print("  ✅ Config criado")
+
+-- ============================================================
+-- MODULE: BRAZILROTS DATA (20 brazilrots)
+-- ============================================================
+script_("BrazilrotsData","module",[[
+local B = {}
+B.lista = {
+    {id=1,  nome="Jacarézinho Pixinho",    emoji="🐊",   raridade="Comum",        renda=150,     preco=500,       cor=Color3.fromRGB(0,180,60),    chance=0.20, evento=false},
+    {id=2,  nome="Frangasso Assadão",      emoji="🍗",   raridade="Comum",        renda=300,     preco=1200,      cor=Color3.fromRGB(220,140,20),   chance=0.18, evento=false},
+    {id=3,  nome="Capivarão Tranquilão",   emoji="🦦",   raridade="Comum",        renda=500,     preco=2000,      cor=Color3.fromRGB(140,100,60),   chance=0.16, evento=false},
+    {id=4,  nome="Ônibusão Atrasadão",     emoji="🚌",   raridade="Incomum",      renda=900,     preco=5000,      cor=Color3.fromRGB(255,200,0),    chance=0.12, evento=false},
+    {id=5,  nome="Nenenzão Ronaldinho",    emoji="⚽",   raridade="Incomum",      renda=1500,    preco=9000,      cor=Color3.fromRGB(0,80,200),     chance=0.10, evento=false},
+    {id=6,  nome="Vaqueirão Forrozeiro",   emoji="🤠",   raridade="Incomum",      renda=2200,    preco=15000,     cor=Color3.fromRGB(180,100,0),    chance=0.09, evento=false},
+    {id=7,  nome="Baladeiro Funkadão",     emoji="🎵",   raridade="Raro",         renda=4000,    preco=35000,     cor=Color3.fromRGB(200,0,200),    chance=0.06, evento=false},
+    {id=8,  nome="Papagainho Xingadão",    emoji="🦜",   raridade="Raro",         renda=6500,    preco=60000,     cor=Color3.fromRGB(255,80,0),     chance=0.05, evento=false},
+    {id=9,  nome="Pizzaiolo Napolitânio",  emoji="🍕",   raridade="Raro",         renda=9000,    preco=90000,     cor=Color3.fromRGB(220,50,50),    chance=0.04, evento=false},
+    {id=10, nome="Cangaceiro Sertanejo",   emoji="🌵",   raridade="Épico",        renda=18000,   preco=250000,    cor=Color3.fromRGB(180,120,0),    chance=0.025,evento=false},
+    {id=11, nome="Jacarézão do Pantanal",  emoji="🐊🔥", raridade="Épico",        renda=30000,   preco=500000,    cor=Color3.fromRGB(0,120,40),     chance=0.020,evento=false},
+    {id=12, nome="Camarão Gaúcho",         emoji="🦐",   raridade="Épico",        renda=45000,   preco=800000,    cor=Color3.fromRGB(255,100,120),  chance=0.015,evento=false},
+    {id=13, nome="Mãe de Santo Poderosa",  emoji="🕯️",  raridade="Lendário",     renda=90000,   preco=2500000,   cor=Color3.fromRGB(100,0,150),    chance=0.008,evento=false},
+    {id=14, nome="Tucano Diplomata",       emoji="🦜👔", raridade="Lendário",     renda=150000,  preco=5000000,   cor=Color3.fromRGB(0,100,200),    chance=0.005,evento=false},
+    {id=15, nome="Foguerão Junino",        emoji="🎆",   raridade="Mítico",       renda=400000,  preco=20000000,  cor=Color3.fromRGB(255,50,0),     chance=0.002,evento=false},
+    {id=16, nome="Nordestino Chovião",     emoji="🌧️",  raridade="Mítico",       renda=600000,  preco=40000000,  cor=Color3.fromRGB(50,100,200),   chance=0.001,evento=true},
+    {id=17, nome="Boto Cor-de-Rosa",       emoji="🐬",   raridade="Secreto",      renda=1000000, preco=150000000, cor=Color3.fromRGB(255,150,200),  chance=0.0005,evento=false},
+    {id=18, nome="Chico Xavier Vidente",   emoji="👁️",  raridade="Secreto",      renda=1500000, preco=300000000, cor=Color3.fromRGB(200,220,255),  chance=0.0003,evento=false},
+    {id=19, nome="Pelézão Eterno",         emoji="👑",   raridade="Brainrot God", renda=5000000, preco=1000000000,cor=Color3.fromRGB(255,215,0),    chance=0.0001,evento=false},
+    {id=20, nome="Lulinha do Trabalhador", emoji="🔨",   raridade="Brainrot God", renda=8000000, preco=2000000000,cor=Color3.fromRGB(220,50,50),    chance=0.00005,evento=false},
+}
+B.porId = {}
+for _,v in ipairs(B.lista) do B.porId[v.id]=v end
+
+function B:GetAleatorio(permiteEvento)
+    local pool={}
+    for _,b in ipairs(self.lista) do
+        if not b.evento or permiteEvento then table.insert(pool,b) end
+    end
+    local total=0
+    for _,b in ipairs(pool) do total=total+b.chance end
+    local r=math.random()*total
+    local ac=0
+    for _,b in ipairs(pool) do
+        ac=ac+b.chance
+        if r<=ac then return b end
+    end
+    return pool[#pool]
+end
+return B
+]], pastaRS)
+
+print("  ✅ BrazilrotsData criado (20 Brazilrots)")
+
+-- ============================================================
+-- MODULE: INDEX DATA
+-- ============================================================
+script_("IndexData","module",[[
+local I={}
+I.niveis={
+    {nome="Novato BR",    req=3,  recompensa={tipo="dinheiro",valor=10000}},
+    {nome="Colecionador", req=6,  recompensa={tipo="dinheiro",valor=100000}},
+    {nome="Experiente",   req=10, recompensa={tipo="dinheiro",valor=1000000}},
+    {nome="Veterano BR",  req=14, recompensa={tipo="dinheiro",valor=10000000}},
+    {nome="Mestre BR",    req=18, recompensa={tipo="dinheiro",valor=100000000}},
+    {nome="Lenda do PIX", req=20, recompensa={tipo="titulo", valor="👑 Lenda do PIX"}},
+}
+function I:GetNivel(qtd)
+    local atual=nil
+    for _,n in ipairs(self.niveis) do
+        if qtd>=n.req then atual=n end
+    end
+    return atual
+end
+return I
+]], pastaRS)
+
+print("  ✅ IndexData criado")
+
+-- ============================================================
+-- SERVER SCRIPT: GAME MAIN
+-- ============================================================
+script_("GameMain","script",[[
+local Players   = game:GetService("Players")
+local DS        = game:GetService("DataStoreService")
+local RS        = game:GetService("ReplicatedStorage")
+
+local pasta     = RS:WaitForChild("Brazilrot")
+local Ev        = pasta:WaitForChild("Eventos")
+local Fn        = pasta:WaitForChild("Funcoes")
+local Config    = require(pasta:WaitForChild("Config"))
+local BRData    = require(pasta:WaitForChild("BrazilrotsData"))
+
+local store     = DS:GetDataStore("StolenBrazilrot_v1")
+local estado    = {}
+
+local function fmt(n)
+    if n>=1e12 then return string.format("%.1fT",n/1e12)
+    elseif n>=1e9 then return string.format("%.1fB",n/1e9)
+    elseif n>=1e6 then return string.format("%.1fM",n/1e6)
+    elseif n>=1e3 then return string.format("%.1fK",n/1e3)
+    else return tostring(math.floor(n)) end
+end
+
+local function padrao()
+    return {dinheiro=100,rebirths=0,brazilrots={},indexUnicos={},baseProtAt=0,totalGanho=0,totalRoubos=0}
+end
+
+local function calcRenda(d)
+    local base=0
+    local mult=1+((d.rebirths or 0)*Config.REBIRTH_BONUS)
+    for _,br in ipairs(d.brazilrots) do
+        local info=BRData.porId[br.id]
+        if info then base=base+info.renda end
+    end
+    return math.floor(base*mult)
+end
+
+local function salvar(player)
+    local d=estado[player.UserId]
+    if not d then return end
+    pcall(function() store:SetAsync("p_"..player.UserId, d) end)
+end
+
+local function carregar(player)
+    local d
+    local ok,r=pcall(function() d=store:GetAsync("p_"..player.UserId) end)
+    estado[player.UserId]=(ok and d) and d or padrao()
+end
+
+Players.PlayerAdded:Connect(function(p)
+    carregar(p)
+    task.spawn(function()
+        while p.Parent do task.wait(60) salvar(p) end
+    end)
+    task.wait(2)
+    Ev:WaitForChild("AtualizarHUD"):FireClient(p, estado[p.UserId])
+end)
+
+Players.PlayerRemoving:Connect(function(p)
+    salvar(p)
+    estado[p.UserId]=nil
+end)
+
+game:BindToClose(function()
+    for uid in pairs(estado) do
+        local p=Players:GetPlayerByUserId(uid)
+        if p then salvar(p) end
+    end
+end)
+
+-- Renda passiva
+task.spawn(function()
+    while true do
+        task.wait(Config.TICK_RENDA)
+        for _,p in ipairs(Players:GetPlayers()) do
+            local d=estado[p.UserId]
+            if d then
+                local r=calcRenda(d)
+                if r>Config.ANTICHEAT_MAX_GAIN then r=0 end
+                d.dinheiro=d.dinheiro+r
+                d.totalGanho=d.totalGanho+r
+                Ev:WaitForChild("AtualizarHUD"):FireClient(p,d)
+            end
+        end
+    end
+end)
+
+-- Comprar
+Ev:WaitForChild("ComprarBrazilrot").OnServerEvent:Connect(function(p, brId)
+    local d=estado[p.UserId] if not d then return end
+    if not Config.LOJA_DISPONIVEL then
+        Ev:WaitForChild("NotificarJogador"):FireClient(p,"❌ Loja indisponível!","erro") return
+    end
+    local br=BRData.porId[brId] if not br then return end
+    if #d.brazilrots>=Config.MAX_BRAZILROTS then
+        Ev:WaitForChild("NotificarJogador"):FireClient(p,"❌ Base cheia!","erro") return
+    end
+    if d.dinheiro<br.preco then
+        Ev:WaitForChild("NotificarJogador"):FireClient(p,"❌ Sem grana!","erro") return
+    end
+    d.dinheiro=d.dinheiro-br.preco
+    local key=tostring(tick())..tostring(math.random(1,99999))
+    table.insert(d.brazilrots,{id=br.id,nome=br.nome,uniqueKey=key})
+    if not d.indexUnicos[br.id] then
+        d.indexUnicos[br.id]=true
+        Ev:WaitForChild("AtualizarIndex"):FireClient(p,d.indexUnicos)
+    end
+    Ev:WaitForChild("AtualizarHUD"):FireClient(p,d)
+    Ev:WaitForChild("NotificarJogador"):FireClient(p,"✅ "..br.emoji.." "..br.nome.." comprado!","sucesso")
+end)
+
+-- Roubar
+Ev:WaitForChild("RoubarBrazilrot").OnServerEvent:Connect(function(ladrao,vitima,uKey)
+    if ladrao==vitima then return end
+    local dL=estado[ladrao.UserId]
+    local dV=estado[vitima.UserId]
+    if not dL or not dV then return end
+    if tick()<(dV.baseProtAt or 0) then
+        Ev:WaitForChild("NotificarJogador"):FireClient(ladrao,"🔒 Base protegida!","erro") return
+    end
+    local idx=nil
+    for i,br in ipairs(dV.brazilrots) do
+        if br.uniqueKey==uKey then idx=i break end
+    end
+    if not idx then return end
+    if #dL.brazilrots>=Config.MAX_BRAZILROTS then
+        Ev:WaitForChild("NotificarJogador"):FireClient(ladrao,"❌ Sua base tá cheia!","erro") return
+    end
+    local brR=table.remove(dV.brazilrots,idx)
+    table.insert(dL.brazilrots,brR)
+    dL.totalRoubos=(dL.totalRoubos or 0)+1
+    if not dL.indexUnicos[brR.id] then
+        dL.indexUnicos[brR.id]=true
+        Ev:WaitForChild("AtualizarIndex"):FireClient(ladrao,dL.indexUnicos)
+    end
+    Ev:WaitForChild("AtualizarHUD"):FireClient(ladrao,dL)
+    Ev:WaitForChild("AtualizarHUD"):FireClient(vitima,dV)
+    local info=BRData.porId[brR.id]
+    local em=info and info.emoji or "🧠"
+    Ev:WaitForChild("NotificarJogador"):FireClient(ladrao,"🥷 Roubou "..em.." "..brR.nome.."!","roubo")
+    Ev:WaitForChild("NotificarJogador"):FireClient(vitima,"😡 Roubaram seu "..em.." "..brR.nome.."!","alerta")
+end)
+
+-- Proteger base
+Ev:WaitForChild("ProtegerBase").OnServerEvent:Connect(function(p)
+    local d=estado[p.UserId] if not d then return end
+    local agora=tick()
+    if agora<(d.baseProtAt or 0) then
+        local rest=math.ceil(d.baseProtAt-agora)
+        Ev:WaitForChild("NotificarJogador"):FireClient(p,"⏳ Já protegida por "..rest.."s","info") return
+    end
+    d.baseProtAt=agora+Config.PROTECAO_BASE
+    Ev:WaitForChild("AtualizarHUD"):FireClient(p,d)
+    Ev:WaitForChild("NotificarJogador"):FireClient(p,"🔒 Base protegida por "..Config.PROTECAO_BASE.."s!","sucesso")
+end)
+
+-- Rebirth
+Ev:WaitForChild("RealizarRebirth").OnServerEvent:Connect(function(p)
+    local d=estado[p.UserId] if not d then return end
+    local prox=(d.rebirths or 0)+1
+    local req=Config.REBIRTH_REQUISITOS[prox]
+    if not req then
+        Ev:WaitForChild("NotificarJogador"):FireClient(p,"🏆 Rebirth máximo!","info") return
+    end
+    if d.dinheiro<req.dinheiro then
+        Ev:WaitForChild("NotificarJogador"):FireClient(p,"❌ Precisa de mais dinheiro!","erro") return
+    end
+    if #d.brazilrots<req.brazilrots then
+        Ev:WaitForChild("NotificarJogador"):FireClient(p,"❌ Precisa de mais Brazilrots!","erro") return
+    end
+    d.rebirths=prox
+    d.dinheiro=100
+    d.brazilrots={}
+    Ev:WaitForChild("AtualizarHUD"):FireClient(p,d)
+    Ev:WaitForChild("NotificarJogador"):FireClient(
+        p,"🔄 REBIRTH "..prox.."! Bônus: +"..math.floor(prox*Config.REBIRTH_BONUS*100).."%","rebirth"
+    )
+end)
+
+Fn:WaitForChild("GetDadosJogador").OnServerInvoke=function(p) return estado[p.UserId] or padrao() end
+Fn:WaitForChild("GetListaBrazilrots").OnServerInvoke=function() return BRData.lista end
+
+print("✅ GameMain carregado!")
+]], pastaSS)
+
+print("  ✅ GameMain criado")
+
+-- ============================================================
+-- SERVER SCRIPT: ANTI-CHEAT
+-- ============================================================
+script_("AntiCheat","script",[[
+local Players   = game:GetService("Players")
+local RS        = game:GetService("ReplicatedStorage")
+local Config    = require(RS:WaitForChild("Brazilrot"):WaitForChild("Config"))
+local alerta    = RS:WaitForChild("Brazilrot"):WaitForChild("Eventos"):WaitForChild("AntiCheatAlerta")
+
+local posAnterior = {}
+local flags       = {}
+local MAX_FLAGS   = 5
+
+local function flag(p, motivo)
+    flags[p.UserId]=(flags[p.UserId] or 0)+1
+    warn("🚨 ANTICHEAT ["..p.Name.."] "..motivo.." | flags: "..flags[p.UserId])
+    if flags[p.UserId]>=MAX_FLAGS then
+        p:Kick("Banido por comportamento suspeito: "..motivo)
+    end
+end
+
+task.spawn(function()
+    while true do
+        task.wait(1)
+        for _,p in ipairs(Players:GetPlayers()) do
+            local char=p.Character
+            if char then
+                local hrp=char:FindFirstChild("HumanoidRootPart")
+                local hum=char:FindFirstChildOfClass("Humanoid")
+                if hrp and hum then
+                    local pos=hrp.Position
+                    local ant=posAnterior[p.UserId]
+                    if ant then
+                        local dist=(pos-ant).Magnitude
+                        if dist>Config.ANTICHEAT_TP_DIST then
+                            flag(p,"TELEPORTE dist="..math.floor(dist))
+                        end
+                        if pos.Y>200 then
+                            flag(p,"FLY_HACK y="..math.floor(pos.Y))
+                        end
+                    end
+                    posAnterior[p.UserId]=pos
+                    if hum.WalkSpeed>30 then
+                        hum.WalkSpeed=16
+                        flag(p,"SPEED_HACK")
+                    end
+                    if hum.JumpPower>65 then
+                        hum.JumpPower=50
+                        flag(p,"JUMP_HACK")
+                    end
+                    -- Noclip check
+                    if hum:GetState()==Enum.HumanoidStateType.Physics then
+                        flag(p,"NOCLIP_SUSPEITO")
+                    end
+                end
+            end
+        end
+    end
+end)
+
+alerta.OnServerEvent:Connect(function(p, motivo) flag(p, motivo) end)
+
+Players.PlayerRemoving:Connect(function(p)
+    posAnterior[p.UserId]=nil
+    flags[p.UserId]=nil
+end)
+
+print("🛡️ AntiCheat ativo!")
+]], pastaSS)
+
+print("  ✅ AntiCheat criado")
+
+-- ============================================================
+-- SERVER SCRIPT: ESTEIRA
+-- ============================================================
+script_("EsteiraManager","script",[[
+local Players   = game:GetService("Players")
+local RS        = game:GetService("ReplicatedStorage")
+local pasta     = RS:WaitForChild("Brazilrot")
+local Config    = require(pasta:WaitForChild("Config"))
+local BRData    = require(pasta:WaitForChild("BrazilrotsData"))
+local Ev        = pasta:WaitForChild("Eventos")
+
+local mapa      = workspace:WaitForChild("Mapa")
+local esteira   = mapa:WaitForChild("Esteira")
+local eventoAtivo = false
+
+local function spawnItem()
+    local br=BRData:GetAleatorio(eventoAtivo)
+    local item=Instance.new("Part")
+    item.Name       = "BRItem_"..br.id
+    item.Size       = Vector3.new(3,3,3)
+    item.Color      = br.cor
+    item.Material   = Enum.Material.Neon
+    item.Anchored   = true
+    item.CanCollide = false
+    item.Position   = esteira.Position + Vector3.new(0,2.5,-esteira.Size.Z/2)
+    item.Parent     = workspace
+
+    local bb=Instance.new("BillboardGui")
+    bb.Size=UDim2.new(0,200,0,70)
+    bb.StudsOffset=Vector3.new(0,4,0)
+    bb.AlwaysOnTop=true
+    bb.Parent=item
+
+    local lbl=Instance.new("TextLabel")
+    lbl.Size=UDim2.new(1,0,1,0)
+    lbl.BackgroundColor3=Color3.fromRGB(20,20,20)
+    lbl.BackgroundTransparency=0.2
+    lbl.TextColor3=Color3.new(1,1,1)
+    lbl.Text=br.emoji.." "..br.nome.."\n["..br.raridade.."] "..br.preco
+    lbl.Font=Enum.Font.GothamBold
+    lbl.TextScaled=true
+    lbl.Parent=bb
+
+    -- Cor da raridade
+    local Config2=require(RS:WaitForChild("Brazilrot"):WaitForChild("Config"))
+    lbl.TextColor3=Config2.COR_RARIDADE[br.raridade] or Color3.new(1,1,1)
+
+    -- Mover pela esteira
+    task.spawn(function()
+        local vel=15
+        local dur=esteira.Size.Z/vel
+        local t=0
+        while t<dur and item.Parent do
+            task.wait(0.05)
+            t=t+0.05
+            item.Position=item.Position+Vector3.new(0,0,vel*0.05)
+        end
+        if item.Parent then item:Destroy() end
+    end)
+
+    -- Toque = tenta comprar
+    item.Touched:Connect(function(hit)
+        local char=hit.Parent
+        local p=Players:GetPlayerByCharacter(char)
+        if p then
+            Ev:WaitForChild("ComprarBrazilrot"):FireServer(br.id)
+            item:Destroy()
+        end
+    end)
+end
+
+-- Loop da esteira
+task.spawn(function()
+    while true do
+        task.wait(Config.ESTEIRA_INTERVALO)
+        pcall(spawnItem)
+    end
+end)
+
+-- Evento de chuva: a cada 10min dura 2min
+task.spawn(function()
+    while true do
+        task.wait(600)
+        eventoAtivo=true
+        for _,p in ipairs(Players:GetPlayers()) do
+            Ev:WaitForChild("NotificarJogador"):FireClient(
+                p,"🌧️ EVENTO DE CHUVA! Nordestino Chovião apareceu!","evento"
+            )
+        end
+        task.wait(120)
+        eventoAtivo=false
+        for _,p in ipairs(Players:GetPlayers()) do
+            Ev:WaitForChild("NotificarJogador"):FireClient(p,"☀️ Evento de chuva encerrado!","info")
+        end
+    end
+end)
+
+print("🚂 EsteiraManager ativo!")
+]], pastaSS)
+
+print("  ✅ EsteiraManager criado")
+
+-- ============================================================
+-- LOCAL SCRIPT: HUD
+-- ============================================================
+script_("HUDController","local",[[
+local Players   = game:GetService("Players")
+local RS        = game:GetService("ReplicatedStorage")
+local player    = Players.LocalPlayer
+local pasta     = RS:WaitForChild("Brazilrot")
+local Ev        = pasta:WaitForChild("Eventos")
+
+local gui=Instance.new("ScreenGui")
+gui.Name="BrazilrotHUD" gui.ResetOnSpawn=false gui.IgnoreGuiInset=true gui.Parent=player.PlayerGui
+
+-- Painel
+local pan=Instance.new("Frame")
+pan.Size=UDim2.new(0,290,0,225) pan.Position=UDim2.new(0,10,1,-235)
+pan.BackgroundColor3=Color3.fromRGB(8,50,8) pan.BorderSizePixel=0 pan.Parent=gui
+Instance.new("UICorner",pan).CornerRadius=UDim.new(0,14)
+local stroke=Instance.new("UIStroke",pan) stroke.Color=Color3.fromRGB(0,210,70) stroke.Thickness=2
+
+-- Título
+local tit=Instance.new("TextLabel")
+tit.Size=UDim2.new(1,0,0,40) tit.BackgroundColor3=Color3.fromRGB(0,130,35) tit.BorderSizePixel=0
+tit.Text="🇧🇷  STEAL A BRAZILROT" tit.Font=Enum.Font.GothamBold
+tit.TextColor3=Color3.fromRGB(255,220,0) tit.TextScaled=true tit.Parent=pan
+Instance.new("UICorner",tit).CornerRadius=UDim.new(0,14)
+
+local function lbl(y,txt,cor)
+    local l=Instance.new("TextLabel")
+    l.Size=UDim2.new(1,-14,0,27) l.Position=UDim2.new(0,7,0,y)
+    l.BackgroundTransparency=1 l.Text=txt l.Font=Enum.Font.GothamBold
+    l.TextColor3=cor or Color3.new(1,1,1) l.TextScaled=true
+    l.TextXAlignment=Enum.TextXAlignment.Left l.Parent=pan
+    return l
+end
+
+local lblDin  = lbl(46,  "💰 R$ 100",        Color3.fromRGB(255,220,0))
+local lblRend = lbl(77,  "📈 R$ 0/s",         Color3.fromRGB(100,255,100))
+local lblBR   = lbl(108, "🧠 Brazilrots: 0",  Color3.new(1,1,1))
+local lblReb  = lbl(139, "🔄 Rebirth: 0",     Color3.fromRGB(180,120,255))
+
+local function btn(txt, cor, x, y, w)
+    local b=Instance.new("TextButton")
+    b.Size=UDim2.new(w,0,0,33) b.Position=UDim2.new(x,0,0,y)
+    b.BackgroundColor3=cor b.TextColor3=Color3.new(1,1,1)
+    b.Text=txt b.Font=Enum.Font.GothamBold b.TextScaled=true b.BorderSizePixel=0 b.Parent=pan
+    Instance.new("UICorner",b).CornerRadius=UDim.new(0,8)
+    return b
+end
+
+local btnProt = btn("🔒 TRANCAR",  Color3.fromRGB(180,0,0),   0.03, 178, 0.46)
+local btnReb  = btn("🔄 REBIRTH",  Color3.fromRGB(100,0,180), 0.51, 178, 0.46)
+
+-- Notificação (topo centro)
+local notifGui=Instance.new("ScreenGui")
+notifGui.Name="NotifGUI" notifGui.ResetOnSpawn=false notifGui.IgnoreGuiInset=true notifGui.Parent=player.PlayerGui
+
+local notifFr=Instance.new("Frame")
+notifFr.Size=UDim2.new(0,360,0,55) notifFr.Position=UDim2.new(0.5,-180,0,12)
+notifFr.BackgroundTransparency=1 notifFr.Visible=false notifFr.Parent=notifGui
+
+local notifLbl=Instance.new("TextLabel")
+notifLbl.Size=UDim2.new(1,0,1,0) notifLbl.BackgroundColor3=Color3.fromRGB(20,20,20)
+notifLbl.BackgroundTransparency=0.15 notifLbl.TextColor3=Color3.new(1,1,1)
+notifLbl.Font=Enum.Font.GothamBold notifLbl.TextScaled=true notifLbl.Parent=notifFr
+Instance.new("UICorner",notifLbl).CornerRadius=UDim.new(0,10)
+
+local coresNotif={
+    sucesso=Color3.fromRGB(0,160,70), erro=Color3.fromRGB(180,0,0),
+    roubo=Color3.fromRGB(220,120,0),  alerta=Color3.fromRGB(200,40,40),
+    info=Color3.fromRGB(60,100,220),  rebirth=Color3.fromRGB(140,0,220),
+    evento=Color3.fromRGB(0,160,220),
+}
+
+local function notif(txt, tipo)
+    notifLbl.Text=txt
+    notifLbl.BackgroundColor3=coresNotif[tipo] or Color3.fromRGB(40,40,40)
+    notifFr.Visible=true
+    task.delay(3.5,function() notifFr.Visible=false end)
+end
+
+local function fmt(n)
+    if n>=1e12 then return string.format("%.1fT",n/1e12)
+    elseif n>=1e9 then return string.format("%.1fB",n/1e9)
+    elseif n>=1e6 then return string.format("%.1fM",n/1e6)
+    elseif n>=1e3 then return string.format("%.1fK",n/1e3)
+    else return tostring(math.floor(n)) end
+end
+
+Ev:WaitForChild("AtualizarHUD").OnClientEvent:Connect(function(d)
+    lblDin.Text  = "💰 R$ "..fmt(d.dinheiro)
+    lblBR.Text   = "🧠 Brazilrots: "..#d.brazilrots
+    lblReb.Text  = "🔄 Rebirth: "..(d.rebirths or 0)
+    local BRD    = require(RS:WaitForChild("Brazilrot"):WaitForChild("BrazilrotsData"))
+    local Cfg    = require(RS:WaitForChild("Brazilrot"):WaitForChild("Config"))
+    local renda  = 0
+    local mult   = 1+((d.rebirths or 0)*Cfg.REBIRTH_BONUS)
+    for _,br in ipairs(d.brazilrots) do
+        local info=BRD.porId[br.id]
+        if info then renda=renda+info.renda end
+    end
+    lblRend.Text = "📈 R$ "..fmt(math.floor(renda*mult)).."/s"
+    local prot   = tick()<(d.baseProtAt or 0)
+    btnProt.BackgroundColor3 = prot and Color3.fromRGB(0,140,0) or Color3.fromRGB(180,0,0)
+    btnProt.Text = prot and "🔒 PROTEGIDA" or "🔒 TRANCAR"
+end)
+
+Ev:WaitForChild("NotificarJogador").OnClientEvent:Connect(notif)
+
+btnProt.MouseButton1Click:Connect(function()
+    Ev:WaitForChild("ProtegerBase"):FireServer()
+end)
+
+local rebirthPendente=false
+btnReb.MouseButton1Click:Connect(function()
+    if rebirthPendente then
+        rebirthPendente=false
+        Ev:WaitForChild("RealizarRebirth"):FireServer()
+        btnReb.Text="🔄 REBIRTH"
+    else
+        rebirthPendente=true
+        btnReb.Text="⚠️ CONFIRMAR?"
+        task.delay(4,function()
+            rebirthPendente=false
+            btnReb.Text="🔄 REBIRTH"
+        end)
+    end
+end)
+
+print("🎮 HUD pronto!")
+]], pastaSPS)
+
+print("  ✅ HUDController criado")
+
+-- ============================================================
+-- LOCAL SCRIPT: LOJA (INDISPONÍVEL)
+-- ============================================================
+script_("LojaController","local",[[
+local Players=game:GetService("Players")
+local player=Players.LocalPlayer
+
+local gui=Instance.new("ScreenGui")
+gui.Name="LojaGUI" gui.ResetOnSpawn=false gui.Parent=player.PlayerGui
+
+local btnL=Instance.new("TextButton")
+btnL.Size=UDim2.new(0,100,0,38) btnL.Position=UDim2.new(1,-110,0,10)
+btnL.BackgroundColor3=Color3.fromRGB(20,20,40) btnL.TextColor3=Color3.fromRGB(200,200,200)
+btnL.Text="🛒 LOJA" btnL.Font=Enum.Font.GothamBold btnL.TextScaled=true btnL.BorderSizePixel=0 btnL.Parent=gui
+Instance.new("UICorner",btnL).CornerRadius=UDim.new(0,8)
+
+local painelL=Instance.new("Frame")
+painelL.Size=UDim2.new(0,400,0,480) painelL.Position=UDim2.new(0.5,-200,0.5,-240)
+painelL.BackgroundColor3=Color3.fromRGB(12,12,28) painelL.Visible=false painelL.ZIndex=10 painelL.Parent=gui
+Instance.new("UICorner",painelL).CornerRadius=UDim.new(0,16)
+Instance.new("UIStroke",painelL).Color=Color3.fromRGB(80,80,200)
+
+local titL=Instance.new("TextLabel")
+titL.Size=UDim2.new(1,0,0,52) titL.BackgroundColor3=Color3.fromRGB(25,25,70) titL.BorderSizePixel=0
+titL.Text="🛒  LOJA DE BRAZILROTS" titL.Font=Enum.Font.GothamBold
+titL.TextColor3=Color3.fromRGB(255,220,0) titL.TextScaled=true titL.ZIndex=11 titL.Parent=painelL
+Instance.new("UICorner",titL).CornerRadius=UDim.new(0,16)
+
+local avFr=Instance.new("Frame")
+avFr.Size=UDim2.new(0.88,0,0.62,0) avFr.Position=UDim2.new(0.06,0,0.18,0)
+avFr.BackgroundColor3=Color3.fromRGB(55,0,0) avFr.BorderSizePixel=0 avFr.ZIndex=11 avFr.Parent=painelL
+Instance.new("UICorner",avFr).CornerRadius=UDim.new(0,12)
+
+local avL=Instance.new("TextLabel")
+avL.Size=UDim2.new(1,0,1,0) avL.BackgroundTransparency=1 avL.ZIndex=12 avL.Parent=avFr
+avL.Text="🚧  LOJA INDISPONÍVEL\n\nEm breve você poderá comprar\nBrazilrots diretamente aqui!\n\nFique ligado nas atualizações 🇧🇷"
+avL.Font=Enum.Font.GothamBold avL.TextColor3=Color3.fromRGB(255,80,80) avL.TextScaled=true
+
+local btnF=Instance.new("TextButton")
+btnF.Size=UDim2.new(0,40,0,40) btnF.Position=UDim2.new(1,-45,0,6)
+btnF.BackgroundColor3=Color3.fromRGB(160,0,0) btnF.Text="✕" btnF.Font=Enum.Font.GothamBold
+btnF.TextColor3=Color3.new(1,1,1) btnF.TextScaled=true btnF.BorderSizePixel=0 btnF.ZIndex=12 btnF.Parent=painelL
+Instance.new("UICorner",btnF).CornerRadius=UDim.new(0,8)
+
+btnL.MouseButton1Click:Connect(function() painelL.Visible=not painelL.Visible end)
+btnF.MouseButton1Click:Connect(function() painelL.Visible=false end)
+]], pastaSPS)
+
+print("  ✅ LojaController criado (INDISPONÍVEL)")
+
+-- ============================================================
+-- LOCAL SCRIPT: INDEX
+-- ============================================================
+script_("IndexController","local",[[
+local Players=game:GetService("Players")
+local RS=game:GetService("ReplicatedStorage")
+local player=Players.LocalPlayer
+local pasta=RS:WaitForChild("Brazilrot")
+local Ev=pasta:WaitForChild("Eventos")
+local BRData=require(pasta:WaitForChild("BrazilrotsData"))
+local Config=require(pasta:WaitForChild("Config"))
+
+local gui=Instance.new("ScreenGui")
+gui.Name="IndexGUI" gui.ResetOnSpawn=false gui.Parent=player.PlayerGui
+
+local btnI=Instance.new("TextButton")
+btnI.Size=UDim2.new(0,100,0,38) btnI.Position=UDim2.new(1,-110,0,54)
+btnI.BackgroundColor3=Color3.fromRGB(10,55,10) btnI.TextColor3=Color3.fromRGB(100,255,100)
+btnI.Text="📖 INDEX" btnI.Font=Enum.Font.GothamBold btnI.TextScaled=true btnI.BorderSizePixel=0 btnI.Parent=gui
+Instance.new("UICorner",btnI).CornerRadius=UDim.new(0,8)
+
+local painelI=Instance.new("Frame")
+painelI.Size=UDim2.new(0,420,0,520) painelI.Position=UDim2.new(0.5,-210,0.5,-260)
+painelI.BackgroundColor3=Color3.fromRGB(10,10,10) painelI.Visible=false painelI.ZIndex=10 painelI.Parent=gui
+Instance.new("UICorner",painelI).CornerRadius=UDim.new(0,16)
+Instance.new("UIStroke",painelI).Color=Color3.fromRGB(0,200,80)
+
+local titI=Instance.new("TextLabel")
+titI.Size=UDim2.new(1,0,0,50) titI.BackgroundColor3=Color3.fromRGB(0,90,25) titI.BorderSizePixel=0
+titI.Text="📖  ÍNDICE" titI.Font=Enum.Font.GothamBold
+titI.TextColor3=Color3.fromRGB(255,220,0) titI.TextScaled=true titI.ZIndex=11 titI.Parent=painelI
+Instance.new("UICorner",titI).CornerRadius=UDim.new(0,16)
+
+local scroll=Instance.new("ScrollingFrame")
+scroll.Size=UDim2.new(1,-10,1,-60) scroll.Position=UDim2.new(0,5,0,55)
+scroll.BackgroundTransparency=1 scroll.BorderSizePixel=0 scroll.ScrollBarThickness=6
+scroll.CanvasSize=UDim2.new(0,0,0,0) scroll.ZIndex=11 scroll.Parent=painelI
+Instance.new("UIListLayout",scroll).Padding=UDim.new(0,5)
+
+local indexUnicos={}
+
+local function popular()
+    for _,c in ipairs(scroll:GetChildren()) do
+        if c:IsA("Frame") then c:Destroy() end
+    end
+    local coletados=0
+    for _ in pairs(indexUnicos) do coletados=coletados+1 end
+    titI.Text="📖  ÍNDICE ("..coletados.."/"..#BRData.lista..")"
+
+    for _,br in ipairs(BRData.lista) do
+        local col=indexUnicos[br.id]==true
+        local row=Instance.new("Frame")
+        row.Size=UDim2.new(1,-10,0,44) row.LayoutOrder=br.id
+        row.BackgroundColor3=col and Color3.fromRGB(20,45,20) or Color3.fromRGB(28,28,28)
+        row.BorderSizePixel=0 row.ZIndex=12 row.Parent=scroll
+        Instance.new("UICorner",row).CornerRadius=UDim.new(0,8)
+
+        local l=Instance.new("TextLabel")
+        l.Size=UDim2.new(1,-10,1,0) l.Position=UDim2.new(0,6,0,0)
+        l.BackgroundTransparency=1 l.Font=Enum.Font.Gotham
+        l.TextScaled=true l.TextXAlignment=Enum.TextXAlignment.Left l.ZIndex=13 l.Parent=row
+        if col then
+            l.TextColor3=Config.COR_RARIDADE[br.raridade] or Color3.new(1,1,1)
+            l.Text=br.emoji.."  "..br.nome.."  ["..br.raridade.."]"
+        else
+            l.TextColor3=Color3.fromRGB(70,70,70)
+            l.Text="❓  ???  ["..br.raridade.."]"
+        end
+    end
+    scroll.CanvasSize=UDim2.new(0,0,0,#BRData.lista*49)
+end
+
+Ev:WaitForChild("AtualizarIndex").OnClientEvent:Connect(function(u)
+    indexUnicos=u
+    if painelI.Visible then popular() end
+end)
+
+local btnFI=Instance.new("TextButton")
+btnFI.Size=UDim2.new(0,40,0,40) btnFI.Position=UDim2.new(1,-45,0,5)
+btnFI.BackgroundColor3=Color3.fromRGB(160,0,0) btnFI.Text="✕" btnFI.Font=Enum.Font.GothamBold
+btnFI.TextColor3=Color3.new(1,1,1) btnFI.TextScaled=true btnFI.BorderSizePixel=0 btnFI.ZIndex=12 btnFI.Parent=painelI
+Instance.new("UICorner",btnFI).CornerRadius=UDim.new(0,8)
+
+btnI.MouseButton1Click:Connect(function() painelI.Visible=not painelI.Visible if painelI.Visible then popular() end end)
+btnFI.MouseButton1Click:Connect(function() painelI.Visible=false end)
+]], pastaSPS)
+
+print("  ✅ IndexController criado")
+
+-- ============================================================
+-- MAPA
+-- ============================================================
+local mapaFolder = WS:FindFirstChild("Mapa")
+if mapaFolder then mapaFolder:Destroy() end
+mapaFolder = pasta("Mapa", WS)
+
+-- Chão
+part({Name="Chao",Size=Vector3.new(400,1,400),Position=Vector3.new(0,0,0),
+    Anchored=true,BrickColor=BrickColor.new("Bright green"),Material=Enum.Material.Grass,
+    CastShadow=false}, mapaFolder)
+
+-- Esteira
+part({Name="Esteira",Size=Vector3.new(8,0.5,200),Position=Vector3.new(0,0.75,0),
+    Anchored=true,BrickColor=BrickColor.new("Dark grey"),Material=Enum.Material.SmoothPlastic}, mapaFolder)
+
+-- Listras
+for i=-9,9 do
+    part({Name="Listra",Size=Vector3.new(8,0.1,1),Position=Vector3.new(0,1.01,i*10),
+        Anchored=true,BrickColor=BrickColor.new("Bright yellow"),
+        Material=Enum.Material.SmoothPlastic,CanCollide=false}, mapaFolder)
+end
+
+-- 8 Bases
+local posB = {{-60,-60},{60,-60},{-60,0},{60,0},{-60,60},{60,60},{-120,-30},{120,-30}}
+local corB  = {
+    BrickColor.new("Bright blue"),  BrickColor.new("Bright red"),
+    BrickColor.new("Bright yellow"),BrickColor.new("Lime green"),
+    BrickColor.new("Bright orange"),BrickColor.new("Hot pink"),
+    BrickColor.new("Cyan"),         BrickColor.new("Lavender"),
+}
+
+for i,pos in ipairs(posB) do
+    local baseM = Instance.new("Model")
+    baseM.Name  = "Base"..i
+    baseM.Parent = mapaFolder
+
+    part({Name="Chao",Size=Vector3.new(28,0.5,28),
+        Position=Vector3.new(pos[1],0.75,pos[2]),Anchored=true,
+        BrickColor=corB[i],Material=Enum.Material.SmoothPlastic}, baseM)
+
+    for _,pw in ipairs({
+        {Vector3.new(28,5,1), Vector3.new(pos[1],3.25,pos[2]+14)},
+        {Vector3.new(28,5,1), Vector3.new(pos[1],3.25,pos[2]-14)},
+        {Vector3.new(1,5,28), Vector3.new(pos[1]+14,3.25,pos[2])},
+        {Vector3.new(1,5,28), Vector3.new(pos[1]-14,3.25,pos[2])},
+    }) do
+        part({Name="Parede",Size=pw[1],Position=pw[2],Anchored=true,
+            BrickColor=corB[i],Material=Enum.Material.SmoothPlastic,Transparency=0.55}, baseM)
+    end
+
+    part({Name="Cofre",Size=Vector3.new(4,4,4),Position=Vector3.new(pos[1],3,pos[2]),
+        Anchored=true,BrickColor=BrickColor.new("Gold"),Material=Enum.Material.Neon}, baseM)
+
+    -- Label
+    local cofre = baseM:FindFirstChild("Cofre")
+    if cofre then
+        local bb=Instance.new("BillboardGui")
+        bb.Size=UDim2.new(0,90,0,28) bb.StudsOffset=Vector3.new(0,6,0)
+        bb.Adornee=cofre bb.Parent=baseM
+        local lb=Instance.new("TextLabel")
+        lb.Size=UDim2.new(1,0,1,0) lb.BackgroundTransparency=1
+        lb.Text="BASE "..i lb.Font=Enum.Font.GothamBold
+        lb.TextColor3=Color3.new(1,1,1) lb.TextScaled=true lb.Parent=bb
+    end
+end
+
+-- SpawnLocation
+if not WS:FindFirstChild("SpawnLocation") then
+    local sp=Instance.new("SpawnLocation")
+    sp.Size=Vector3.new(6,1,6) sp.Position=Vector3.new(0,1.5,-185)
+    sp.BrickColor=BrickColor.new("Bright green") sp.Anchored=true sp.Parent=WS
+end
+
+-- Lighting
+Lighting.Brightness    = 2
+Lighting.TimeOfDay     = "14:00:00"
+Lighting.FogEnd        = 1200
+Lighting.Ambient       = Color3.fromRGB(90,90,70)
+
+local atm = Lighting:FindFirstChildOfClass("Atmosphere") or Instance.new("Atmosphere")
+atm.Density  = 0.25
+atm.Offset   = 0.2
+atm.Color    = Color3.fromRGB(195,215,255)
+atm.Haze     = 0.8
+atm.Glare    = 0.2
+atm.Parent   = Lighting
+
+print("  ✅ Mapa criado (chão, esteira, 8 bases)")
+
+-- ============================================================
+-- RELATÓRIO FINAL
+-- ============================================================
+print("")
+print("🇧🇷 ============================================ 🇧🇷")
+print("       STEAL A BRAZILROT — GERAÇÃO COMPLETA!")
+print("🇧🇷 ============================================ 🇧🇷")
+print("")
+print("  📦 ReplicatedStorage/Brazilrot/")
+print("     ├── Config")
+print("     ├── BrazilrotsData  (20 Brazilrots)")
+print("     ├── IndexData")
+print("     ├── Eventos/        (9 RemoteEvents)")
+print("     └── Funcoes/        (2 RemoteFunctions)")
+print("")
+print("  ⚙️  ServerScriptService/Brazilrot/")
+print("     ├── GameMain        (compra/roubo/renda/rebirth/datasave)")
+print("     ├── AntiCheat       (speed/fly/tp/noclip/jump hack)")
+print("     └── EsteiraManager  (spawner + evento de chuva)")
+print("")
+print("  🎮 StarterPlayerScripts/")
+print("     ├── HUDController")
+print("     ├── LojaController  (🚧 INDISPONÍVEL)")
+print("     └── IndexController (coleção de 20 Brazilrots)")
+print("")
+print("  🗺️  Workspace/Mapa/")
+print("     ├── Chao + Esteira + Listras")
+print("     └── 8 Bases coloridas com Cofre")
+print("")
+print("  ✅ Tudo pronto! Delete este LocalScript.")
+print("🇧🇷 ============================================ 🇧🇷")
