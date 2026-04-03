@@ -1,0 +1,1420 @@
+-- =====================================================
+--         BRANZZ HUB V1
+--         By: BranzZ Dev Team  |  Versão: 1.0
+--         discord.gg/4RmZv2GyBx
+-- =====================================================
+
+local Players          = game:GetService("Players")
+local RunService       = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService     = game:GetService("TweenService")
+local LocalPlayer      = Players.LocalPlayer
+
+-- =====================================================
+-- PALETA DE CORES (sem neon — design limpo/moderno)
+-- =====================================================
+local C = {
+    bg         = Color3.fromRGB(13, 13, 18),      -- fundo principal
+    surface    = Color3.fromRGB(20, 20, 28),      -- cards/frames
+    surface2   = Color3.fromRGB(28, 28, 38),      -- elementos internos
+    border     = Color3.fromRGB(45, 45, 60),      -- bordas sutis
+    accent     = Color3.fromRGB(99, 102, 241),    -- roxo/índigo elegante
+    accentHover= Color3.fromRGB(120, 123, 255),
+    accentSoft = Color3.fromRGB(99, 102, 241),
+    green      = Color3.fromRGB(52, 211, 153),    -- sucesso
+    red        = Color3.fromRGB(248, 113, 113),   -- erro/off
+    orange     = Color3.fromRGB(251, 146, 60),    -- aviso
+    yellow     = Color3.fromRGB(250, 204, 21),
+    text       = Color3.fromRGB(240, 240, 250),   -- texto principal
+    textMuted  = Color3.fromRGB(120, 120, 145),   -- texto secundário
+    textDim    = Color3.fromRGB(65, 65, 85),      -- texto muito suave
+    white      = Color3.new(1, 1, 1),
+    black      = Color3.new(0, 0, 0),
+}
+
+-- =====================================================
+-- VARIÁVEIS GLOBAIS
+-- =====================================================
+local aimbotEnabled  = false
+local aimbotTarget   = "Head"
+local espEnabled     = false
+local espColorMode   = "White"
+local flyEnabled     = false
+local noclipEnabled  = false
+local infJumpEnabled = false
+local spinBotEnabled = false
+local spinSpeed      = 9999
+local aimFOV         = 150
+local flySpeed       = 80
+local bodyVelocity   = nil
+local bodyGyro       = nil
+local rainbowHue     = 0
+local espObjects     = {}
+local cam            = workspace.CurrentCamera
+
+-- =====================================================
+-- SISTEMA DE KEY — 24H REAL
+-- Persiste no DataStore local via writefile/readfile
+-- =====================================================
+
+-- Arquivo local onde guardamos { key, expireTimestamp }
+local KEY_FILE = "branzz_key_data.json"
+
+local function readKeyData()
+    -- Tenta ler o arquivo salvo pelo executor
+    local ok, data = pcall(function()
+        local raw = readfile(KEY_FILE)
+        return game:GetService("HttpService"):JSONDecode(raw)
+    end)
+    if ok and type(data) == "table" then
+        return data  -- { key = "...", expires = timestamp }
+    end
+    return nil
+end
+
+local function writeKeyData(key, expiresAt)
+    pcall(function()
+        local json = game:GetService("HttpService"):JSONEncode({
+            key     = key,
+            expires = expiresAt
+        })
+        writefile(KEY_FILE, json)
+    end)
+end
+
+local function deleteKeyData()
+    pcall(function()
+        if isfile(KEY_FILE) then
+            delfile(KEY_FILE)
+        end
+    end)
+end
+
+local function isValidKeyFormat(key)
+    -- Formato: BRANZZ-KEY_[alfanum+hífen]-H24
+    return string.match(key, "^BRANZZ%-KEY_[%w%-]+%-H24$") ~= nil
+end
+
+-- Verifica se há uma sessão ativa salva
+-- Retorna: "valid" | "expired" | "none"
+local function checkSavedSession()
+    local data = readKeyData()
+    if not data then return "none", nil end
+    if type(data.expires) ~= "number" then return "none", nil end
+    local now = os.time()
+    if now < data.expires then
+        -- Calcula quanto tempo resta
+        local remaining = data.expires - now
+        local hoursLeft = math.floor(remaining / 3600)
+        local minsLeft  = math.floor((remaining % 3600) / 60)
+        return "valid", data.key, hoursLeft, minsLeft
+    else
+        -- Expirou — limpa
+        deleteKeyData()
+        return "expired", data.key
+    end
+end
+
+-- =====================================================
+-- KEY GUI — DESIGN LIMPO
+-- =====================================================
+local function createKeySystem(callback)
+    local sg = Instance.new("ScreenGui")
+    sg.Name = "BranzZKey"; sg.ResetOnSpawn = false
+    sg.DisplayOrder = 9999; sg.Parent = game.CoreGui
+
+    -- Overlay escuro
+    local overlay = Instance.new("Frame", sg)
+    overlay.Size = UDim2.new(1,0,1,0)
+    overlay.BackgroundColor3 = Color3.fromRGB(0,0,0)
+    overlay.BackgroundTransparency = 0.5
+    overlay.BorderSizePixel = 0
+
+    -- Card principal
+    local card = Instance.new("Frame", sg)
+    card.Size = UDim2.new(0, 440, 0, 440)
+    card.Position = UDim2.new(0.5, -220, 0.5, -220)
+    card.BackgroundColor3 = C.bg
+    card.Active = true; card.Draggable = true
+    Instance.new("UICorner", card).CornerRadius = UDim.new(0, 16)
+
+    -- Borda sutil
+    local border = Instance.new("UIStroke", card)
+    border.Color = C.border; border.Thickness = 1
+
+    -- Faixa superior colorida
+    local topAccent = Instance.new("Frame", card)
+    topAccent.Size = UDim2.new(1, 0, 0, 3)
+    topAccent.BackgroundColor3 = C.accent
+    topAccent.BorderSizePixel = 0
+    Instance.new("UICorner", topAccent).CornerRadius = UDim.new(0, 16)
+
+    -- Logo area
+    local logoArea = Instance.new("Frame", card)
+    logoArea.Size = UDim2.new(1, 0, 0, 90)
+    logoArea.Position = UDim2.new(0, 0, 0, 8)
+    logoArea.BackgroundTransparency = 1
+
+    -- Ícone ⚡
+    local iconLbl = Instance.new("TextLabel", logoArea)
+    iconLbl.Size = UDim2.new(1, 0, 0, 42)
+    iconLbl.Position = UDim2.new(0, 0, 0, 12)
+    iconLbl.BackgroundTransparency = 1
+    iconLbl.Text = "⚡"
+    iconLbl.TextSize = 36
+    iconLbl.Font = Enum.Font.GothamBlack
+    iconLbl.TextColor3 = C.accent
+
+    local brandLbl = Instance.new("TextLabel", logoArea)
+    brandLbl.Size = UDim2.new(1, 0, 0, 28)
+    brandLbl.Position = UDim2.new(0, 0, 0, 50)
+    brandLbl.BackgroundTransparency = 1
+    brandLbl.Text = "BRANZZ HUB V1"
+    brandLbl.TextSize = 22
+    brandLbl.Font = Enum.Font.GothamBlack
+    brandLbl.TextColor3 = C.text
+
+    local subLbl = Instance.new("TextLabel", card)
+    subLbl.Size = UDim2.new(1, 0, 0, 18)
+    subLbl.Position = UDim2.new(0, 0, 0, 98)
+    subLbl.BackgroundTransparency = 1
+    subLbl.Text = "Autenticação necessária"
+    subLbl.TextSize = 12
+    subLbl.Font = Enum.Font.Gotham
+    subLbl.TextColor3 = C.textMuted
+
+    -- Divisor
+    local div = Instance.new("Frame", card)
+    div.Size = UDim2.new(0.8, 0, 0, 1)
+    div.Position = UDim2.new(0.1, 0, 0, 124)
+    div.BackgroundColor3 = C.border; div.BorderSizePixel = 0
+
+    -- Label "Sua Key"
+    local keyLabel = Instance.new("TextLabel", card)
+    keyLabel.Size = UDim2.new(0.85, 0, 0, 18)
+    keyLabel.Position = UDim2.new(0.075, 0, 0, 138)
+    keyLabel.BackgroundTransparency = 1
+    keyLabel.Text = "CHAVE DE ACESSO"
+    keyLabel.TextSize = 10
+    keyLabel.Font = Enum.Font.GothamBold
+    keyLabel.TextColor3 = C.textMuted
+    keyLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+    -- Input da key
+    local keyBox = Instance.new("TextBox", card)
+    keyBox.Size = UDim2.new(0.85, 0, 0, 46)
+    keyBox.Position = UDim2.new(0.075, 0, 0, 160)
+    keyBox.BackgroundColor3 = C.surface
+    keyBox.PlaceholderText = "BRANZZ-KEY_...-H24"
+    keyBox.PlaceholderColor3 = C.textDim
+    keyBox.Text = ""
+    keyBox.TextColor3 = C.text
+    keyBox.Font = Enum.Font.GothamBold
+    keyBox.TextSize = 13
+    keyBox.ClearTextOnFocus = false
+    Instance.new("UICorner", keyBox).CornerRadius = UDim.new(0, 10)
+    local kbStroke = Instance.new("UIStroke", keyBox)
+    kbStroke.Color = C.border; kbStroke.Thickness = 1
+
+    keyBox.Focused:Connect(function()
+        TweenService:Create(kbStroke, TweenInfo.new(0.15), {Color = C.accent}):Play()
+    end)
+    keyBox.FocusLost:Connect(function()
+        TweenService:Create(kbStroke, TweenInfo.new(0.15), {Color = C.border}):Play()
+    end)
+
+    -- Status label
+    local statusLbl = Instance.new("TextLabel", card)
+    statusLbl.Size = UDim2.new(0.85, 0, 0, 22)
+    statusLbl.Position = UDim2.new(0.075, 0, 0, 212)
+    statusLbl.BackgroundTransparency = 1
+    statusLbl.Text = ""
+    statusLbl.TextSize = 11
+    statusLbl.Font = Enum.Font.GothamBold
+    statusLbl.TextColor3 = C.red
+    statusLbl.TextXAlignment = Enum.TextXAlignment.Left
+
+    -- Botão ENTRAR
+    local enterBtn = Instance.new("TextButton", card)
+    enterBtn.Size = UDim2.new(0.85, 0, 0, 46)
+    enterBtn.Position = UDim2.new(0.075, 0, 0, 240)
+    enterBtn.BackgroundColor3 = C.accent
+    enterBtn.Text = "Entrar"
+    enterBtn.TextColor3 = C.white
+    enterBtn.Font = Enum.Font.GothamBlack
+    enterBtn.TextSize = 15
+    Instance.new("UICorner", enterBtn).CornerRadius = UDim.new(0, 10)
+
+    enterBtn.MouseEnter:Connect(function()
+        TweenService:Create(enterBtn, TweenInfo.new(0.15), {BackgroundColor3 = C.accentHover}):Play()
+    end)
+    enterBtn.MouseLeave:Connect(function()
+        TweenService:Create(enterBtn, TweenInfo.new(0.15), {BackgroundColor3 = C.accent}):Play()
+    end)
+
+    -- Divisor 2
+    local div2 = Instance.new("Frame", card)
+    div2.Size = UDim2.new(0.8, 0, 0, 1)
+    div2.Position = UDim2.new(0.1, 0, 0, 302)
+    div2.BackgroundColor3 = C.border; div2.BorderSizePixel = 0
+
+    -- "Não tem key?"
+    local noKeyLbl = Instance.new("TextLabel", card)
+    noKeyLbl.Size = UDim2.new(0.85, 0, 0, 20)
+    noKeyLbl.Position = UDim2.new(0.075, 0, 0, 314)
+    noKeyLbl.BackgroundTransparency = 1
+    noKeyLbl.Text = "Não tem uma key? Acesse nosso Discord:"
+    noKeyLbl.TextSize = 11
+    noKeyLbl.Font = Enum.Font.Gotham
+    noKeyLbl.TextColor3 = C.textMuted
+    noKeyLbl.TextXAlignment = Enum.TextXAlignment.Left
+
+    -- Botão copiar Discord
+    local discordBtn = Instance.new("TextButton", card)
+    discordBtn.Size = UDim2.new(0.85, 0, 0, 44)
+    discordBtn.Position = UDim2.new(0.075, 0, 0, 338)
+    discordBtn.BackgroundColor3 = Color3.fromRGB(88, 101, 242)
+    discordBtn.Text = "  Copiar Link — discord.gg/4RmZv2GyBx"
+    discordBtn.TextColor3 = C.white
+    discordBtn.Font = Enum.Font.GothamBold
+    discordBtn.TextSize = 13
+    Instance.new("UICorner", discordBtn).CornerRadius = UDim.new(0, 10)
+
+    discordBtn.MouseEnter:Connect(function()
+        TweenService:Create(discordBtn, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(108, 121, 255)}):Play()
+    end)
+    discordBtn.MouseLeave:Connect(function()
+        TweenService:Create(discordBtn, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(88, 101, 242)}):Play()
+    end)
+    discordBtn.MouseButton1Click:Connect(function()
+        pcall(function() setclipboard("https://discord.gg/4RmZv2GyBx") end)
+        local prev = discordBtn.Text
+        discordBtn.Text = "  Link copiado!"
+        discordBtn.BackgroundColor3 = C.green
+        task.wait(2)
+        discordBtn.Text = prev
+        discordBtn.BackgroundColor3 = Color3.fromRGB(88, 101, 242)
+    end)
+
+    -- Versão
+    local verLbl = Instance.new("TextLabel", card)
+    verLbl.Size = UDim2.new(1, 0, 0, 16)
+    verLbl.Position = UDim2.new(0, 0, 0, 418)
+    verLbl.BackgroundTransparency = 1
+    verLbl.Text = "v1.0  •  Keys expiram em 24h"
+    verLbl.TextSize = 10
+    verLbl.Font = Enum.Font.Gotham
+    verLbl.TextColor3 = C.textDim
+
+    -- ── Lógica de submit ──
+    local function tryEnter(inputKey)
+        inputKey = string.gsub(inputKey, "%s+", "")
+
+        if not isValidKeyFormat(inputKey) then
+            statusLbl.Text = "Formato inválido. Use: BRANZZ-KEY_...-H24"
+            statusLbl.TextColor3 = C.red
+            task.wait(3); statusLbl.Text = ""
+            return
+        end
+
+        -- Salva e registra o tempo exato de ativação
+        local expiresAt = os.time() + (24 * 60 * 60)
+        writeKeyData(inputKey, expiresAt)
+
+        -- Animação de sucesso
+        enterBtn.Text = "Verificado ✓"
+        enterBtn.BackgroundColor3 = C.green
+        statusLbl.Text = "Acesso concedido! Key válida por 24h."
+        statusLbl.TextColor3 = C.green
+
+        task.wait(1.2)
+        sg:Destroy()
+        callback()
+    end
+
+    enterBtn.MouseButton1Click:Connect(function()
+        tryEnter(keyBox.Text)
+    end)
+
+    keyBox.FocusLost:Connect(function(enterPressed)
+        if enterPressed then tryEnter(keyBox.Text) end
+    end)
+end
+
+-- =====================================================
+-- ESP — PERSISTENTE + THROUGH WALLS
+-- =====================================================
+local function getESPColor()
+    rainbowHue = (rainbowHue + 0.003) % 1
+    if espColorMode == "Rainbow" then return Color3.fromHSV(rainbowHue, 1, 1)
+    elseif espColorMode == "Red"   then return Color3.fromRGB(255, 70, 70)
+    elseif espColorMode == "Green" then return Color3.fromRGB(60, 255, 110)
+    elseif espColorMode == "Blue"  then return Color3.fromRGB(60, 160, 255)
+    else return Color3.fromRGB(255, 255, 255) end
+end
+
+local function createESPForPlayer(plr)
+    local uid = tostring(plr.UserId)
+    if espObjects[uid] then return end
+    local obj = {}
+
+    -- SelectionBox (caixa 3D)
+    local sb = Instance.new("SelectionBox")
+    sb.LineThickness       = 0.10
+    sb.SurfaceTransparency = 0.80
+    sb.SurfaceColor3       = Color3.fromRGB(255, 255, 255)
+    sb.Color3              = Color3.fromRGB(255, 255, 255)
+    sb.Parent              = workspace
+    obj.selBox = sb
+
+    -- BoxHandleAdornment (através das paredes — AlwaysOnTop)
+    obj.boxAdorn = nil
+
+    -- Billboard
+    obj.billboard = nil
+
+    -- Linha Drawing
+    local ok, ln = pcall(function()
+        local l = Drawing.new("Line")
+        l.Thickness = 1.8; l.Transparency = 0
+        l.Visible = false; l.Color = Color3.new(1, 1, 1)
+        return l
+    end)
+    obj.line = ok and ln or nil
+
+    espObjects[uid] = obj
+end
+
+local function removeESPForPlayer(uid)
+    local obj = espObjects[uid]
+    if not obj then return end
+    pcall(function()
+        if obj.selBox    then obj.selBox:Destroy()    end
+        if obj.boxAdorn  then obj.boxAdorn:Destroy()  end
+        if obj.billboard then obj.billboard:Destroy() end
+        if obj.line      then obj.line:Remove()       end
+    end)
+    espObjects[uid] = nil
+end
+
+local function updateESP()
+    -- Limpa players saídos
+    local active = {}
+    for _, p in pairs(Players:GetPlayers()) do active[tostring(p.UserId)] = true end
+    for uid in pairs(espObjects) do
+        if not active[uid] then removeESPForPlayer(uid) end
+    end
+
+    if not espEnabled then
+        for _, obj in pairs(espObjects) do
+            pcall(function()
+                if obj.selBox    then obj.selBox.Adornee = nil       end
+                if obj.boxAdorn  then obj.boxAdorn.Adornee = nil     end
+                if obj.line      then obj.line.Visible = false       end
+                if obj.billboard then obj.billboard.Enabled = false  end
+            end)
+        end
+        return
+    end
+
+    local screenBottom = Vector2.new(cam.ViewportSize.X / 2, cam.ViewportSize.Y)
+
+    for _, plr in pairs(Players:GetPlayers()) do
+        if plr == LocalPlayer then continue end
+        createESPForPlayer(plr)
+
+        local uid  = tostring(plr.UserId)
+        local obj  = espObjects[uid]
+        if not obj then continue end
+
+        local char = plr.Character
+        local root = char and char:FindFirstChild("HumanoidRootPart")
+        local head = char and char:FindFirstChild("Head")
+        local hum  = char and char:FindFirstChildOfClass("Humanoid")
+        local col  = getESPColor()
+
+        -- SelectionBox 3D
+        if char and root then
+            obj.selBox.Adornee       = char
+            obj.selBox.Color3        = col
+            obj.selBox.SurfaceColor3 = Color3.new(col.R * 0.25, col.G * 0.25, col.B * 0.25)
+        else
+            obj.selBox.Adornee = nil
+        end
+
+        -- BoxHandleAdornment (AlwaysOnTop = atravessa paredes)
+        if root then
+            if not obj.boxAdorn or not obj.boxAdorn.Parent then
+                local bha = Instance.new("BoxHandleAdornment")
+                bha.AlwaysOnTop  = true
+                bha.ZIndex       = 5
+                bha.Transparency = 0.30
+                bha.Size         = Vector3.new(3.6, 5.8, 2.0)
+                bha.Parent       = root
+                obj.boxAdorn     = bha
+            end
+            obj.boxAdorn.Adornee = root
+            obj.boxAdorn.Color3  = col
+            if hum then
+                local h = math.max(hum.HipHeight + 2.4, 3)
+                obj.boxAdorn.Size   = Vector3.new(3.4, h * 2, 2.0)
+                obj.boxAdorn.CFrame = CFrame.new(0, 0, 0)
+            end
+        elseif obj.boxAdorn then
+            obj.boxAdorn.Adornee = nil
+        end
+
+        -- Billboard (nome + vida) com fundo escuro
+        if head and hum then
+            if not obj.billboard or not obj.billboard.Parent then
+                pcall(function() if obj.billboard then obj.billboard:Destroy() end end)
+                local bb = Instance.new("BillboardGui")
+                bb.AlwaysOnTop = true
+                bb.Size        = UDim2.new(0, 160, 0, 50)
+                bb.StudsOffset = Vector3.new(0, 4.0, 0)
+                bb.Adornee     = head; bb.Parent = head
+
+                -- Fundo do billboard
+                local bg = Instance.new("Frame", bb)
+                bg.Size = UDim2.new(1, 0, 1, 0)
+                bg.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+                bg.BackgroundTransparency = 0.45
+                bg.BorderSizePixel = 0
+                Instance.new("UICorner", bg).CornerRadius = UDim.new(0, 6)
+
+                local nL = Instance.new("TextLabel", bb); nL.Name = "NL"
+                nL.Size = UDim2.new(1, -8, 0, 24); nL.Position = UDim2.new(0, 4, 0, 2)
+                nL.BackgroundTransparency = 1
+                nL.Font = Enum.Font.GothamBold; nL.TextSize = 13
+                nL.TextStrokeTransparency = 0.2; nL.TextStrokeColor3 = C.black
+                nL.TextXAlignment = Enum.TextXAlignment.Left
+
+                -- Barra de vida
+                local hpBg = Instance.new("Frame", bb)
+                hpBg.Name = "HpBg"
+                hpBg.Size = UDim2.new(1, -8, 0, 8)
+                hpBg.Position = UDim2.new(0, 4, 0, 28)
+                hpBg.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+                hpBg.BorderSizePixel = 0
+                Instance.new("UICorner", hpBg).CornerRadius = UDim.new(1, 0)
+
+                local hpFill = Instance.new("Frame", hpBg)
+                hpFill.Name = "Fill"
+                hpFill.Size = UDim2.new(1, 0, 1, 0)
+                hpFill.BackgroundColor3 = C.green
+                hpFill.BorderSizePixel = 0
+                Instance.new("UICorner", hpFill).CornerRadius = UDim.new(1, 0)
+
+                local hpLbl = Instance.new("TextLabel", bb); hpLbl.Name = "HL"
+                hpLbl.Size = UDim2.new(1, -8, 0, 14); hpLbl.Position = UDim2.new(0, 4, 0, 34)
+                hpLbl.BackgroundTransparency = 1
+                hpLbl.Font = Enum.Font.Gotham; hpLbl.TextSize = 10
+                hpLbl.TextColor3 = Color3.fromRGB(200, 200, 200)
+                hpLbl.TextXAlignment = Enum.TextXAlignment.Left
+
+                obj.billboard = bb
+            end
+
+            obj.billboard.Enabled = true
+            obj.billboard.Adornee = head
+
+            local nL    = obj.billboard:FindFirstChild("NL")
+            local hpBg  = obj.billboard:FindFirstChild("HpBg")
+            local hpFill = hpBg and hpBg:FindFirstChild("Fill")
+            local hL    = obj.billboard:FindFirstChild("HL")
+
+            if nL then nL.Text = plr.Name; nL.TextColor3 = col end
+
+            if hum and hpFill and hL then
+                local pct = math.clamp(hum.Health / math.max(hum.MaxHealth, 1), 0, 1)
+                hpFill.Size = UDim2.new(pct, 0, 1, 0)
+                -- Cor da barra muda com a vida
+                if pct > 0.6 then
+                    hpFill.BackgroundColor3 = C.green
+                elseif pct > 0.3 then
+                    hpFill.BackgroundColor3 = C.orange
+                else
+                    hpFill.BackgroundColor3 = C.red
+                end
+                hL.Text = string.format("%d / %d HP", math.floor(hum.Health), math.floor(hum.MaxHealth))
+            end
+        elseif obj.billboard then
+            obj.billboard.Enabled = false
+        end
+
+        -- Linha 2D para a cabeça
+        local target = head or root
+        if target and obj.line then
+            local sp, onScreen = cam:WorldToViewportPoint(target.Position)
+            if onScreen then
+                obj.line.From    = screenBottom
+                obj.line.To      = Vector2.new(sp.X, sp.Y)
+                obj.line.Color   = col
+                obj.line.Visible = true
+            else
+                obj.line.Visible = false
+            end
+        elseif obj.line then
+            obj.line.Visible = false
+        end
+    end
+end
+
+Players.PlayerRemoving:Connect(function(plr)
+    removeESPForPlayer(tostring(plr.UserId))
+end)
+
+-- =====================================================
+-- AIMBOT
+-- =====================================================
+local function getAimbotPart(char)
+    if not char then return nil end
+    if aimbotTarget == "Head"  then return char:FindFirstChild("Head") end
+    if aimbotTarget == "Torso" then return char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso") end
+    if aimbotTarget == "Legs"  then return char:FindFirstChild("LeftLowerLeg") or char:FindFirstChild("Left Leg") end
+    return char:FindFirstChild("Head")
+end
+
+local function getClosestEnemy()
+    local closest = nil; local shortest = math.huge
+    local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not myRoot then return nil end
+
+    for _, plr in pairs(Players:GetPlayers()) do
+        if plr == LocalPlayer or not plr.Character then continue end
+        local part = getAimbotPart(plr.Character)
+        local hum  = plr.Character:FindFirstChildOfClass("Humanoid")
+        local root = plr.Character:FindFirstChild("HumanoidRootPart")
+        if not (part and hum and root and hum.Health > 0) then continue end
+
+        local sp, onScreen = cam:WorldToViewportPoint(part.Position)
+        if onScreen then
+            local dc = (Vector2.new(sp.X, sp.Y) - Vector2.new(cam.ViewportSize.X/2, cam.ViewportSize.Y/2)).Magnitude
+            local d3 = (root.Position - myRoot.Position).Magnitude
+            if dc <= aimFOV and d3 < shortest then
+                shortest = d3; closest = plr
+            end
+        end
+    end
+    return closest
+end
+
+-- =====================================================
+-- FLY
+-- =====================================================
+local function applyFly()
+    if not (LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")) then return end
+    local root = LocalPlayer.Character.HumanoidRootPart
+    if bodyVelocity then bodyVelocity:Destroy() end
+    if bodyGyro     then bodyGyro:Destroy()     end
+    bodyVelocity = Instance.new("BodyVelocity", root)
+    bodyVelocity.Velocity  = Vector3.new(0, 0, 0)
+    bodyVelocity.MaxForce  = Vector3.new(4e4, 4e4, 4e4)
+    bodyGyro = Instance.new("BodyGyro", root)
+    bodyGyro.MaxTorque = Vector3.new(4e4, 4e4, 4e4)
+    bodyGyro.P = 1000; bodyGyro.D = 50
+end
+local function removeFly()
+    if bodyVelocity then bodyVelocity:Destroy(); bodyVelocity = nil end
+    if bodyGyro     then bodyGyro:Destroy();     bodyGyro     = nil end
+end
+
+UserInputService.JumpRequest:Connect(function()
+    if infJumpEnabled and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+        LocalPlayer.Character.Humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+    end
+end)
+
+-- =====================================================
+-- HUB GUI — DESIGN LIMPO / MODERNO
+-- =====================================================
+local hubGui   = nil
+local hubFrame = nil
+local panelHidden = false
+
+-- =====================================================
+-- SISTEMA DE OCULTAR PAINEL
+-- O frame NUNCA é destruído nem Visible=false
+-- Apenas as transparências mudam — snapshot salva o estado
+-- para restaurar exatamente como estava
+-- =====================================================
+local _snap = nil  -- snapshot das transparências
+
+local function takeSnapshot(parent)
+    local s = {}
+    -- Próprio frame
+    s[#s+1] = {obj=parent, bg=parent.BackgroundTransparency}
+    for _, c in pairs(parent:GetDescendants()) do
+        pcall(function()
+            local e = {obj=c}
+            if c:IsA("Frame") or c:IsA("ScrollingFrame") then
+                e.bg = c.BackgroundTransparency
+            end
+            if c:IsA("TextLabel") or c:IsA("TextButton") or c:IsA("TextBox") then
+                e.text = c.TextTransparency
+                e.bg   = c.BackgroundTransparency
+            end
+            if c:IsA("UIStroke") then
+                e.stroke = c.Transparency
+            end
+            if c:IsA("ImageLabel") or c:IsA("ImageButton") then
+                e.img = c.ImageTransparency
+                e.bg  = c.BackgroundTransparency
+            end
+            s[#s+1] = e
+        end)
+    end
+    return s
+end
+
+local function hideAll(parent)
+    parent.BackgroundTransparency = 1
+    for _, c in pairs(parent:GetDescendants()) do
+        pcall(function()
+            if c:IsA("Frame") or c:IsA("ScrollingFrame")    then c.BackgroundTransparency = 1 end
+            if c:IsA("TextLabel") or c:IsA("TextButton") or c:IsA("TextBox") then
+                c.TextTransparency = 1; c.BackgroundTransparency = 1
+            end
+            if c:IsA("UIStroke")   then c.Transparency = 1 end
+            if c:IsA("ImageLabel") or c:IsA("ImageButton") then
+                c.ImageTransparency = 1; c.BackgroundTransparency = 1
+            end
+        end)
+    end
+end
+
+local function restoreSnapshot(s)
+    for _, e in ipairs(s) do
+        pcall(function()
+            local c = e.obj
+            if c:IsA("Frame") or c:IsA("ScrollingFrame") then
+                if e.bg   ~= nil then c.BackgroundTransparency = e.bg   end
+            end
+            if c:IsA("TextLabel") or c:IsA("TextButton") or c:IsA("TextBox") then
+                if e.text ~= nil then c.TextTransparency       = e.text end
+                if e.bg   ~= nil then c.BackgroundTransparency = e.bg   end
+            end
+            if c:IsA("UIStroke") then
+                if e.stroke ~= nil then c.Transparency = e.stroke end
+            end
+            if c:IsA("ImageLabel") or c:IsA("ImageButton") then
+                if e.img  ~= nil then c.ImageTransparency      = e.img  end
+                if e.bg   ~= nil then c.BackgroundTransparency = e.bg   end
+            end
+        end)
+    end
+end
+
+local function setPanelVisible(v)
+    if not hubFrame then return end
+    panelHidden = not v
+    if v then
+        -- Mostra: restaura snapshot — frame nunca foi destruído
+        if _snap then restoreSnapshot(_snap) end
+        hubFrame.Active = true
+    else
+        -- Oculta: tira snapshot AGORA e esconde tudo
+        _snap = takeSnapshot(hubFrame)
+        hideAll(hubFrame)
+        hubFrame.Active = false
+    end
+end
+
+-- =====================================================
+-- SISTEMA DE REABRIR PAINEL
+--
+-- 📱 CELULAR: Triple tap com qualquer dedo (3 cliques rápidos)
+-- 💻 PC: CapsLock + Shift → aperta qualquer tecla → essa tecla
+--        fica salva como atalho para abrir/fechar o painel
+-- =====================================================
+
+-- ── MOBILE: Triple tap ──
+local tapTimes = {}  -- armazena os últimos taps
+
+UserInputService.TouchTap:Connect(function()
+    if not panelHidden then return end
+    local now = tick()
+    table.insert(tapTimes, now)
+
+    -- Mantém só os últimos 3 taps
+    while #tapTimes > 3 do table.remove(tapTimes, 1) end
+
+    -- Verifica se 3 taps aconteceram em menos de 0.6s
+    if #tapTimes == 3 and (tapTimes[3] - tapTimes[1]) <= 0.6 then
+        tapTimes = {}
+        setPanelVisible(true)
+    end
+end)
+
+-- ── PC: CapsLock + Shift → configura tecla personalizada ──
+local customHotkey     = nil   -- KeyCode da tecla escolhida
+local listeningForKey  = false -- aguardando o usuário apertar a tecla
+
+-- Notificação auxiliar
+local function notify(title, text)
+    pcall(function()
+        game:GetService("StarterGui"):SetCore("SendNotification", {
+            Title = title, Text = text, Duration = 4
+        })
+    end)
+end
+
+-- Teclas que NÃO devem ser usadas como hotkey (modificadores)
+local ignoredKeys = {
+    [Enum.KeyCode.CapsLock]      = true,
+    [Enum.KeyCode.LeftShift]     = true,
+    [Enum.KeyCode.RightShift]    = true,
+    [Enum.KeyCode.LeftControl]   = true,
+    [Enum.KeyCode.RightControl]  = true,
+    [Enum.KeyCode.LeftAlt]       = true,
+    [Enum.KeyCode.RightAlt]      = true,
+    [Enum.KeyCode.LeftMeta]      = true,
+    [Enum.KeyCode.RightMeta]     = true,
+    [Enum.KeyCode.Unknown]       = true,
+}
+
+UserInputService.InputBegan:Connect(function(inp, processed)
+    if inp.UserInputType ~= Enum.UserInputType.Keyboard then return end
+    if ignoredKeys[inp.KeyCode] then return end
+
+    -- Modo configuração: CapsLock + Shift pressionados juntos
+    if not listeningForKey then
+        local caps   = UserInputService:IsKeyDown(Enum.KeyCode.CapsLock)
+        local shift  = UserInputService:IsKeyDown(Enum.KeyCode.LeftShift)
+                    or UserInputService:IsKeyDown(Enum.KeyCode.RightShift)
+        if caps and shift then
+            listeningForKey = true
+            notify("⚡ Branzz V1", "Modo configuração ativado!\nAperte qualquer tecla para definir o atalho do painel.")
+            return
+        end
+    end
+
+    -- Captura a tecla escolhida
+    if listeningForKey then
+        listeningForKey = false
+        customHotkey    = inp.KeyCode
+        notify("⚡ Branzz V1", "Atalho definido:  [ "..tostring(inp.KeyCode.Name).." ]\nUse essa tecla para abrir/fechar o painel.")
+        return
+    end
+
+    -- Usa o atalho configurado
+    if customHotkey and inp.KeyCode == customHotkey and not processed then
+        setPanelVisible(panelHidden)
+    end
+end)
+
+-- =====================================================
+-- CRIAR HUB
+-- =====================================================
+function createHubGUI()
+    local ex = LocalPlayer.PlayerGui:FindFirstChild("BranzZHub")
+    if ex then ex:Destroy() end
+
+    hubGui = Instance.new("ScreenGui")
+    hubGui.Name = "BranzZHub"; hubGui.ResetOnSpawn = false
+    hubGui.DisplayOrder = 9999; hubGui.Parent = LocalPlayer.PlayerGui
+
+    -- Frame principal
+    hubFrame = Instance.new("Frame", hubGui)
+    hubFrame.Size = UDim2.new(0, 340, 0, 700)
+    hubFrame.Position = UDim2.new(0.5, -170, 0.5, -350)
+    hubFrame.BackgroundColor3 = C.bg
+    hubFrame.Active = true; hubFrame.Draggable = true
+    Instance.new("UICorner", hubFrame).CornerRadius = UDim.new(0, 14)
+
+    -- Borda sutil
+    local frameBorder = Instance.new("UIStroke", hubFrame)
+    frameBorder.Color = C.border; frameBorder.Thickness = 1
+
+    -- Sombra (frame maior atrás)
+    local shadow = Instance.new("Frame", hubFrame)
+    shadow.Size = UDim2.new(1, 12, 1, 12)
+    shadow.Position = UDim2.new(0, -6, 0, -6)
+    shadow.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    shadow.BackgroundTransparency = 0.75
+    shadow.ZIndex = 0
+    shadow.BorderSizePixel = 0
+    Instance.new("UICorner", shadow).CornerRadius = UDim.new(0, 18)
+
+    -- ── HEADER ──
+    local header = Instance.new("Frame", hubFrame)
+    header.Size = UDim2.new(1, 0, 0, 56)
+    header.BackgroundColor3 = C.surface
+    header.BorderSizePixel = 0
+    Instance.new("UICorner", header).CornerRadius = UDim.new(0, 14)
+
+    -- Faixa de cor no topo do header
+    local headerAccent = Instance.new("Frame", header)
+    headerAccent.Size = UDim2.new(1, 0, 0, 3)
+    headerAccent.BackgroundColor3 = C.accent
+    headerAccent.BorderSizePixel = 0
+    Instance.new("UICorner", headerAccent).CornerRadius = UDim.new(0, 14)
+
+    -- Borda inferior do header
+    local headerDivider = Instance.new("Frame", header)
+    headerDivider.Size = UDim2.new(1, 0, 0, 1)
+    headerDivider.Position = UDim2.new(0, 0, 1, -1)
+    headerDivider.BackgroundColor3 = C.border; headerDivider.BorderSizePixel = 0
+
+    local headerIcon = Instance.new("TextLabel", header)
+    headerIcon.Size = UDim2.new(0, 30, 1, -6)
+    headerIcon.Position = UDim2.new(0, 12, 0, 3)
+    headerIcon.BackgroundTransparency = 1
+    headerIcon.Text = "⚡"; headerIcon.TextSize = 20
+    headerIcon.Font = Enum.Font.GothamBlack; headerIcon.TextColor3 = C.accent
+
+    local headerTitle = Instance.new("TextLabel", header)
+    headerTitle.Size = UDim2.new(1, -120, 1, -6)
+    headerTitle.Position = UDim2.new(0, 40, 0, 3)
+    headerTitle.BackgroundTransparency = 1
+    headerTitle.Text = "BRANZZ HUB V1"
+    headerTitle.TextSize = 16; headerTitle.Font = Enum.Font.GothamBlack
+    headerTitle.TextColor3 = C.text; headerTitle.TextXAlignment = Enum.TextXAlignment.Left
+
+    -- Botão ocultar (👁)
+    local hideBtn = Instance.new("TextButton", header)
+    hideBtn.Size = UDim2.new(0, 28, 0, 28)
+    hideBtn.Position = UDim2.new(1, -68, 0.5, -14)
+    hideBtn.BackgroundColor3 = C.surface2
+    hideBtn.Text = "👁"; hideBtn.TextColor3 = C.textMuted
+    hideBtn.Font = Enum.Font.GothamBold; hideBtn.TextSize = 14
+    Instance.new("UICorner", hideBtn).CornerRadius = UDim.new(0, 7)
+    local hideBorder = Instance.new("UIStroke", hideBtn); hideBorder.Color = C.border; hideBorder.Thickness = 1
+
+    hideBtn.MouseEnter:Connect(function() TweenService:Create(hideBtn,TweenInfo.new(0.15),{BackgroundColor3=C.border}):Play() end)
+    hideBtn.MouseLeave:Connect(function() TweenService:Create(hideBtn,TweenInfo.new(0.15),{BackgroundColor3=C.surface2}):Play() end)
+    hideBtn.MouseButton1Click:Connect(function() setPanelVisible(false) end)
+
+    -- Botão minimizar (−)
+    local minBtn = Instance.new("TextButton", header)
+    minBtn.Size = UDim2.new(0, 28, 0, 28)
+    minBtn.Position = UDim2.new(1, -34, 0.5, -14)
+    minBtn.BackgroundColor3 = C.surface2
+    minBtn.Text = "−"; minBtn.TextColor3 = C.textMuted
+    minBtn.Font = Enum.Font.GothamBold; minBtn.TextSize = 20
+    Instance.new("UICorner", minBtn).CornerRadius = UDim.new(0, 7)
+    local minBorder = Instance.new("UIStroke", minBtn); minBorder.Color = C.border; minBorder.Thickness = 1
+
+    minBtn.MouseEnter:Connect(function() TweenService:Create(minBtn,TweenInfo.new(0.15),{BackgroundColor3=C.border}):Play() end)
+    minBtn.MouseLeave:Connect(function() TweenService:Create(minBtn,TweenInfo.new(0.15),{BackgroundColor3=C.surface2}):Play() end)
+
+    local minimized = false
+    minBtn.MouseButton1Click:Connect(function()
+        minimized = not minimized
+        TweenService:Create(hubFrame, TweenInfo.new(0.25, Enum.EasingStyle.Quad), {
+            Size = minimized and UDim2.new(0, 340, 0, 56) or UDim2.new(0, 340, 0, 700)
+        }):Play()
+        minBtn.Text = minimized and "+" or "−"
+    end)
+
+    -- ── SCROLL ──
+    local scroll = Instance.new("ScrollingFrame", hubFrame)
+    scroll.Size = UDim2.new(1, -16, 1, -68)
+    scroll.Position = UDim2.new(0, 8, 0, 62)
+    scroll.BackgroundTransparency = 1
+    scroll.ScrollBarThickness = 2
+    scroll.ScrollBarImageColor3 = C.border
+    scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+    scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    scroll.BorderSizePixel = 0
+
+    local layout = Instance.new("UIListLayout", scroll)
+    layout.Padding = UDim.new(0, 6)
+
+    local pad = Instance.new("UIPadding", scroll)
+    pad.PaddingTop = UDim.new(0, 4); pad.PaddingBottom = UDim.new(0, 16)
+
+    -- ── UI Helpers ──
+
+    -- Cabeçalho de seção
+    local function mkSection(txt)
+        local row = Instance.new("Frame", scroll)
+        row.Size = UDim2.new(1, 0, 0, 28)
+        row.BackgroundTransparency = 1
+
+        local lbl = Instance.new("TextLabel", row)
+        lbl.Size = UDim2.new(1, 0, 1, 0)
+        lbl.BackgroundTransparency = 1
+        lbl.Text = txt
+        lbl.TextSize = 11; lbl.Font = Enum.Font.GothamBold
+        lbl.TextColor3 = C.textMuted
+        lbl.TextXAlignment = Enum.TextXAlignment.Left
+
+        local line = Instance.new("Frame", row)
+        line.Size = UDim2.new(1, 0, 0, 1)
+        line.Position = UDim2.new(0, 0, 1, -1)
+        line.BackgroundColor3 = C.border; line.BorderSizePixel = 0
+    end
+
+    -- Toggle limpo
+    local function mkToggle(icon, labelTxt, desc, initState, activeCol, onToggle)
+        local state  = initState or false
+        local aColor = activeCol or C.accent
+
+        local card2 = Instance.new("Frame", scroll)
+        card2.Size = UDim2.new(1, 0, 0, desc ~= "" and 56 or 46)
+        card2.BackgroundColor3 = C.surface
+        Instance.new("UICorner", card2).CornerRadius = UDim.new(0, 10)
+        local c2s = Instance.new("UIStroke", card2); c2s.Color = C.border; c2s.Thickness = 1
+
+        -- Ícone
+        local iconLbl2 = Instance.new("TextLabel", card2)
+        iconLbl2.Size = UDim2.new(0, 32, 0, 32); iconLbl2.Position = UDim2.new(0, 8, 0.5, -16)
+        iconLbl2.BackgroundColor3 = C.surface2
+        iconLbl2.Text = icon; iconLbl2.TextSize = 16
+        iconLbl2.Font = Enum.Font.GothamBlack
+        iconLbl2.TextColor3 = state and aColor or C.textMuted
+        Instance.new("UICorner", iconLbl2).CornerRadius = UDim.new(0, 8)
+
+        -- Nome
+        local nameLbl = Instance.new("TextLabel", card2)
+        nameLbl.Size = UDim2.new(1, -90, 0, 20); nameLbl.Position = UDim2.new(0, 48, 0, desc ~= "" and 8 or 13)
+        nameLbl.BackgroundTransparency = 1; nameLbl.Text = labelTxt
+        nameLbl.TextSize = 14; nameLbl.Font = Enum.Font.GothamBold
+        nameLbl.TextColor3 = C.text; nameLbl.TextXAlignment = Enum.TextXAlignment.Left
+
+        -- Descrição
+        if desc ~= "" then
+            local descLbl = Instance.new("TextLabel", card2)
+            descLbl.Size = UDim2.new(1, -90, 0, 14); descLbl.Position = UDim2.new(0, 48, 0, 30)
+            descLbl.BackgroundTransparency = 1; descLbl.Text = desc
+            descLbl.TextSize = 11; descLbl.Font = Enum.Font.Gotham
+            descLbl.TextColor3 = C.textMuted; descLbl.TextXAlignment = Enum.TextXAlignment.Left
+        end
+
+        -- Toggle pill
+        local pill = Instance.new("Frame", card2)
+        pill.Size = UDim2.new(0, 40, 0, 22); pill.Position = UDim2.new(1, -50, 0.5, -11)
+        pill.BackgroundColor3 = state and aColor or C.surface2
+        Instance.new("UICorner", pill).CornerRadius = UDim.new(1, 0)
+        local pillStroke = Instance.new("UIStroke", pill); pillStroke.Color = state and aColor or C.border; pillStroke.Thickness = 1
+
+        local knob = Instance.new("Frame", pill)
+        knob.Size = UDim2.new(0, 16, 0, 16); knob.Position = UDim2.new(state and 1 or 0, state and -20 or 4, 0.5, -8)
+        knob.BackgroundColor3 = C.white
+        Instance.new("UICorner", knob).CornerRadius = UDim.new(1, 0)
+
+        -- Clique em toda a área do card
+        local hitBtn = Instance.new("TextButton", card2)
+        hitBtn.Size = UDim2.new(1, 0, 1, 0); hitBtn.BackgroundTransparency = 1; hitBtn.Text = ""
+
+        hitBtn.MouseButton1Click:Connect(function()
+            state = not state
+            -- Anima pill
+            TweenService:Create(pill, TweenInfo.new(0.2), {BackgroundColor3 = state and aColor or C.surface2}):Play()
+            pillStroke.Color = state and aColor or C.border
+            TweenService:Create(knob, TweenInfo.new(0.2), {Position = state and UDim2.new(1,-20,0.5,-8) or UDim2.new(0,4,0.5,-8)}):Play()
+            iconLbl2.TextColor3 = state and aColor or C.textMuted
+            onToggle(state)
+        end)
+
+        return card2
+    end
+
+    -- Slider limpo
+    local function mkSlider(icon, labelTxt, minV, maxV, defVal, onSlide)
+        local holder = Instance.new("Frame", scroll)
+        holder.Size = UDim2.new(1, 0, 0, 70)
+        holder.BackgroundColor3 = C.surface
+        Instance.new("UICorner", holder).CornerRadius = UDim.new(0, 10)
+        local hs = Instance.new("UIStroke", holder); hs.Color = C.border; hs.Thickness = 1
+
+        local iconL = Instance.new("TextLabel", holder)
+        iconL.Size = UDim2.new(0, 32, 0, 32); iconL.Position = UDim2.new(0, 8, 0, 8)
+        iconL.BackgroundColor3 = C.surface2
+        iconL.Text = icon; iconL.TextSize = 16
+        iconL.Font = Enum.Font.GothamBlack; iconL.TextColor3 = C.textMuted
+        Instance.new("UICorner", iconL).CornerRadius = UDim.new(0, 8)
+
+        local valLbl = Instance.new("TextLabel", holder)
+        valLbl.Size = UDim2.new(1, -60, 0, 20); valLbl.Position = UDim2.new(0, 48, 0, 8)
+        valLbl.BackgroundTransparency = 1
+        valLbl.Text = labelTxt..":  "..defVal
+        valLbl.TextSize = 13; valLbl.Font = Enum.Font.GothamBold
+        valLbl.TextColor3 = C.text; valLbl.TextXAlignment = Enum.TextXAlignment.Left
+
+        local track = Instance.new("Frame", holder)
+        track.Size = UDim2.new(1, -20, 0, 6)
+        track.Position = UDim2.new(0, 10, 0, 52)
+        track.BackgroundColor3 = C.surface2
+        Instance.new("UICorner", track).CornerRadius = UDim.new(1, 0)
+
+        local ratio = math.clamp((defVal - minV) / (maxV - minV), 0, 1)
+
+        local fill = Instance.new("Frame", track)
+        fill.Size = UDim2.new(ratio, 0, 1, 0)
+        fill.BackgroundColor3 = C.accent
+        Instance.new("UICorner", fill).CornerRadius = UDim.new(1, 0)
+
+        local thumb = Instance.new("Frame", track)
+        thumb.Size = UDim2.new(0, 14, 0, 14)
+        thumb.Position = UDim2.new(ratio, -7, 0.5, -7)
+        thumb.BackgroundColor3 = C.white; thumb.ZIndex = 3
+        Instance.new("UICorner", thumb).CornerRadius = UDim.new(1, 0)
+
+        local hitbox = Instance.new("TextButton", track)
+        hitbox.Size = UDim2.new(1, 20, 0, 28); hitbox.Position = UDim2.new(0, -10, 0.5, -14)
+        hitbox.BackgroundTransparency = 1; hitbox.Text = ""; hitbox.ZIndex = 4
+
+        local dragging = false
+        local function applyX(absX)
+            local rel = math.clamp((absX - track.AbsolutePosition.X) / track.AbsoluteSize.X, 0, 1)
+            fill.Size = UDim2.new(rel, 0, 1, 0)
+            thumb.Position = UDim2.new(rel, -7, 0.5, -7)
+            local val = math.floor(minV + rel * (maxV - minV))
+            valLbl.Text = labelTxt..":  "..val; onSlide(val)
+        end
+        hitbox.InputBegan:Connect(function(inp)
+            if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
+                dragging = true; applyX(inp.Position.X)
+            end
+        end)
+        UserInputService.InputChanged:Connect(function(inp)
+            if not dragging then return end
+            if inp.UserInputType == Enum.UserInputType.MouseMovement or inp.UserInputType == Enum.UserInputType.Touch then
+                applyX(inp.Position.X)
+            end
+        end)
+        UserInputService.InputEnded:Connect(function(inp)
+            if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
+                dragging = false
+            end
+        end)
+        return holder
+    end
+
+    -- Seletor de parte do aimbot
+    local function mkTargetSelector()
+        local holder = Instance.new("Frame", scroll)
+        holder.Size = UDim2.new(1, 0, 0, 76)
+        holder.BackgroundColor3 = C.surface
+        Instance.new("UICorner", holder).CornerRadius = UDim.new(0, 10)
+        local hs = Instance.new("UIStroke", holder); hs.Color = C.border; hs.Thickness = 1
+
+        local iconL = Instance.new("TextLabel", holder)
+        iconL.Size = UDim2.new(0, 32, 0, 32); iconL.Position = UDim2.new(0, 8, 0, 8)
+        iconL.BackgroundColor3 = C.surface2; iconL.Text = "🎯"
+        iconL.TextSize = 16; iconL.Font = Enum.Font.GothamBlack; iconL.TextColor3 = C.textMuted
+        Instance.new("UICorner", iconL).CornerRadius = UDim.new(0, 8)
+
+        local lbl = Instance.new("TextLabel", holder)
+        lbl.Size = UDim2.new(1, -50, 0, 20); lbl.Position = UDim2.new(0, 48, 0, 10)
+        lbl.BackgroundTransparency = 1; lbl.Text = "Mira em"
+        lbl.TextSize = 14; lbl.Font = Enum.Font.GothamBold
+        lbl.TextColor3 = C.text; lbl.TextXAlignment = Enum.TextXAlignment.Left
+
+        local opts = {
+            {label = "Cabeça", value = "Head",  x = 0.01},
+            {label = "Torso",  value = "Torso", x = 0.35},
+            {label = "Pernas", value = "Legs",  x = 0.69},
+        }
+        local btns = {}
+        for _, opt in ipairs(opts) do
+            local b = Instance.new("TextButton", holder)
+            b.Size = UDim2.new(0.30, 0, 0, 26); b.Position = UDim2.new(opt.x, 0, 0, 44)
+            b.Text = opt.label; b.Font = Enum.Font.GothamBold; b.TextSize = 12
+            b.TextColor3 = aimbotTarget == opt.value and C.white or C.textMuted
+            b.AutoButtonColor = false
+            b.BackgroundColor3 = aimbotTarget == opt.value and C.accent or C.surface2
+            Instance.new("UICorner", b).CornerRadius = UDim.new(0, 7)
+            local bs = Instance.new("UIStroke", b); bs.Color = C.border; bs.Thickness = 1
+            btns[opt.value] = b
+
+            b.MouseButton1Click:Connect(function()
+                aimbotTarget = opt.value
+                for v, btn in pairs(btns) do
+                    TweenService:Create(btn, TweenInfo.new(0.15), {
+                        BackgroundColor3 = v == aimbotTarget and C.accent or C.surface2
+                    }):Play()
+                    btn.TextColor3 = v == aimbotTarget and C.white or C.textMuted
+                end
+            end)
+        end
+    end
+
+    -- Botão de ação simples
+    local function mkActionBtn(icon, labelTxt, desc, col, onClick)
+        local card2 = Instance.new("Frame", scroll)
+        card2.Size = UDim2.new(1, 0, 0, desc ~= "" and 56 or 46)
+        card2.BackgroundColor3 = C.surface
+        Instance.new("UICorner", card2).CornerRadius = UDim.new(0, 10)
+        local c2s = Instance.new("UIStroke", card2); c2s.Color = C.border; c2s.Thickness = 1
+
+        local iconLbl2 = Instance.new("TextLabel", card2)
+        iconLbl2.Size = UDim2.new(0, 32, 0, 32); iconLbl2.Position = UDim2.new(0, 8, 0.5, -16)
+        iconLbl2.BackgroundColor3 = C.surface2
+        iconLbl2.Text = icon; iconLbl2.TextSize = 16; iconLbl2.Font = Enum.Font.GothamBlack
+        iconLbl2.TextColor3 = col or C.textMuted
+        Instance.new("UICorner", iconLbl2).CornerRadius = UDim.new(0, 8)
+
+        local nameLbl = Instance.new("TextLabel", card2)
+        nameLbl.Size = UDim2.new(1, -90, 0, 20); nameLbl.Position = UDim2.new(0, 48, 0, desc ~= "" and 8 or 13)
+        nameLbl.BackgroundTransparency = 1; nameLbl.Text = labelTxt
+        nameLbl.TextSize = 14; nameLbl.Font = Enum.Font.GothamBold
+        nameLbl.TextColor3 = C.text; nameLbl.TextXAlignment = Enum.TextXAlignment.Left
+
+        if desc ~= "" then
+            local descLbl = Instance.new("TextLabel", card2)
+            descLbl.Size = UDim2.new(1, -90, 0, 14); descLbl.Position = UDim2.new(0, 48, 0, 30)
+            descLbl.BackgroundTransparency = 1; descLbl.Text = desc
+            descLbl.TextSize = 11; descLbl.Font = Enum.Font.Gotham
+            descLbl.TextColor3 = C.textMuted; descLbl.TextXAlignment = Enum.TextXAlignment.Left
+        end
+
+        -- Seta →
+        local arrow = Instance.new("TextLabel", card2)
+        arrow.Size = UDim2.new(0, 24, 1, 0); arrow.Position = UDim2.new(1, -30, 0, 0)
+        arrow.BackgroundTransparency = 1; arrow.Text = "›"
+        arrow.TextSize = 22; arrow.Font = Enum.Font.GothamBlack; arrow.TextColor3 = C.textDim
+
+        local hitBtn = Instance.new("TextButton", card2)
+        hitBtn.Size = UDim2.new(1, 0, 1, 0); hitBtn.BackgroundTransparency = 1; hitBtn.Text = ""
+        hitBtn.MouseEnter:Connect(function() TweenService:Create(card2,TweenInfo.new(0.15),{BackgroundColor3=C.surface2}):Play() end)
+        hitBtn.MouseLeave:Connect(function() TweenService:Create(card2,TweenInfo.new(0.15),{BackgroundColor3=C.surface}):Play() end)
+        hitBtn.MouseButton1Click:Connect(onClick)
+        return card2
+    end
+
+    -- ==========================================================
+    -- CONTEÚDO
+    -- ==========================================================
+
+    mkSection("  COMBATE")
+    mkToggle("🎯", "Aimbot", "Mira automática nos inimigos", aimbotEnabled, C.red, function(v) aimbotEnabled = v end)
+    mkSlider("↔", "FOV do Aimbot", 50, 500, aimFOV, function(v) aimFOV = v end)
+    mkTargetSelector()
+
+    mkSection("  ESP")
+    mkToggle("👁", "ESP", "Caixas 3D + linhas + nome + vida", espEnabled, C.accent, function(v)
+        espEnabled = v
+        if not v then
+            for _, obj in pairs(espObjects) do
+                pcall(function()
+                    if obj.selBox    then obj.selBox.Adornee = nil      end
+                    if obj.boxAdorn  then obj.boxAdorn.Adornee = nil    end
+                    if obj.line      then obj.line.Visible = false      end
+                    if obj.billboard then obj.billboard.Enabled = false end
+                end)
+            end
+        end
+    end)
+
+    -- Seletor cor ESP
+    local colorCard = Instance.new("Frame", scroll)
+    colorCard.Size = UDim2.new(1, 0, 0, 56)
+    colorCard.BackgroundColor3 = C.surface
+    Instance.new("UICorner", colorCard).CornerRadius = UDim.new(0, 10)
+    local ccs = Instance.new("UIStroke", colorCard); ccs.Color = C.border; ccs.Thickness = 1
+
+    local cIcon = Instance.new("TextLabel", colorCard)
+    cIcon.Size = UDim2.new(0, 32, 0, 32); cIcon.Position = UDim2.new(0, 8, 0.5, -16)
+    cIcon.BackgroundColor3 = C.surface2; cIcon.Text = "🎨"
+    cIcon.TextSize = 16; cIcon.Font = Enum.Font.GothamBlack; cIcon.TextColor3 = C.textMuted
+    Instance.new("UICorner", cIcon).CornerRadius = UDim.new(0, 8)
+
+    local cLbl = Instance.new("TextLabel", colorCard)
+    cLbl.Size = UDim2.new(0, 60, 1, 0); cLbl.Position = UDim2.new(0, 48, 0, 0)
+    cLbl.BackgroundTransparency = 1; cLbl.Text = "Cor ESP"
+    cLbl.TextSize = 13; cLbl.Font = Enum.Font.GothamBold; cLbl.TextColor3 = C.text
+    cLbl.TextXAlignment = Enum.TextXAlignment.Left
+
+    local selDot = nil
+    local cOpts = {
+        {name="White",   col=Color3.new(1,1,1),           pos=0.42},
+        {name="Red",     col=Color3.fromRGB(255,70,70),   pos=0.57},
+        {name="Green",   col=Color3.fromRGB(60,230,110),  pos=0.72},
+        {name="Blue",    col=Color3.fromRGB(60,160,255),  pos=0.87},
+    }
+    for _, c2 in ipairs(cOpts) do
+        local d = Instance.new("TextButton", colorCard)
+        d.Size = UDim2.new(0, 22, 0, 22); d.Position = UDim2.new(c2.pos, -11, 0.5, -11)
+        d.BackgroundColor3 = c2.col; d.Text = ""
+        Instance.new("UICorner", d).CornerRadius = UDim.new(1, 0)
+        local ds = Instance.new("UIStroke", d); ds.Color = C.white
+        ds.Thickness = espColorMode == c2.name and 2.5 or 0
+        if espColorMode == c2.name then selDot = d end
+        d.MouseButton1Click:Connect(function()
+            espColorMode = c2.name
+            if selDot then local ps = selDot:FindFirstChildOfClass("UIStroke"); if ps then ps.Thickness = 0 end end
+            ds.Thickness = 2.5; selDot = d
+        end)
+    end
+
+    -- Rainbow extra
+    local rbBtn = Instance.new("TextButton", colorCard)
+    rbBtn.Size = UDim2.new(0, 22, 0, 22); rbBtn.Position = UDim2.new(0.97, -22, 0.5, -11)
+    rbBtn.Text = ""; rbBtn.BackgroundColor3 = C.surface2
+    Instance.new("UICorner", rbBtn).CornerRadius = UDim.new(1, 0)
+    local rbG = Instance.new("UIGradient", rbBtn)
+    rbG.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0,   Color3.fromRGB(255,0,0)),
+        ColorSequenceKeypoint.new(0.33, Color3.fromRGB(0,255,0)),
+        ColorSequenceKeypoint.new(0.66, Color3.fromRGB(0,0,255)),
+        ColorSequenceKeypoint.new(1,   Color3.fromRGB(255,0,255)),
+    })
+    local rbStroke = Instance.new("UIStroke", rbBtn); rbStroke.Color = C.white
+    rbStroke.Thickness = espColorMode == "Rainbow" and 2.5 or 0
+    if espColorMode == "Rainbow" then selDot = rbBtn end
+    rbBtn.MouseButton1Click:Connect(function()
+        espColorMode = "Rainbow"
+        if selDot then local ps = selDot:FindFirstChildOfClass("UIStroke"); if ps then ps.Thickness = 0 end end
+        rbStroke.Thickness = 2.5; selDot = rbBtn
+    end)
+
+    mkSection("  MOVIMENTO")
+    mkToggle("✈", "Fly", "Voar livremente pelo mapa", flyEnabled, Color3.fromRGB(56, 189, 248), function(v) flyEnabled=v; if v then applyFly() else removeFly() end end)
+    mkSlider("⚡", "Velocidade do Fly", 10, 300, flySpeed, function(v) flySpeed=v end)
+    mkToggle("👻", "NoClip", "Atravessar paredes e objetos", noclipEnabled, C.orange, function(v) noclipEnabled=v end)
+    mkToggle("🦘", "Infinite Jump", "Pular infinitamente", infJumpEnabled, C.yellow, function(v) infJumpEnabled=v end)
+
+    mkSection("  EXTRAS")
+    mkToggle("🌀", "Spin Bot", "Girar o personagem automaticamente", spinBotEnabled, Color3.fromRGB(168, 85, 247), function(v) spinBotEnabled=v end)
+    mkSlider("💨", "Velocidade Spin", 5, 120, spinSpeed, function(v) spinSpeed=v end)
+
+    mkSection("  PAINEL")
+    mkActionBtn("👁", "Ocultar Painel", "📱 Triple tap  |  💻 CapsLock+Shift → escolha tecla", C.yellow, function()
+        setPanelVisible(false)
+    end)
+    mkActionBtn("📵", "Modo Gravação", "Oculta da transmissão/gravação", C.textMuted, function()
+        pcall(function() hubGui:SetAttribute("HideFromCapture", true) end)
+        pcall(function()
+            game:GetService("StarterGui"):SetCore("SendNotification",{
+                Title="⚡ Branzz V1", Text="Modo gravação ativado.", Duration=3
+            })
+        end)
+    end)
+
+    -- Rodapé
+    local footer = Instance.new("Frame", scroll)
+    footer.Size = UDim2.new(1, 0, 0, 38)
+    footer.BackgroundColor3 = C.surface
+    Instance.new("UICorner", footer).CornerRadius = UDim.new(0, 10)
+    local fs = Instance.new("UIStroke", footer); fs.Color = C.border; fs.Thickness = 1
+
+    local footerLbl = Instance.new("TextLabel", footer)
+    footerLbl.Size = UDim2.new(1, 0, 1, 0)
+    footerLbl.BackgroundTransparency = 1
+    footerLbl.Text = "BRANZZ HUB V1  •  discord.gg/4RmZv2GyBx"
+    footerLbl.TextSize = 11; footerLbl.Font = Enum.Font.Gotham
+    footerLbl.TextColor3 = C.textDim
+end
+
+-- =====================================================
+-- LOOPS
+-- =====================================================
+local espTick = 0
+RunService.Heartbeat:Connect(function(dt)
+    espTick = espTick + dt
+    if espTick >= 0.06 then espTick = 0; pcall(updateESP) end
+end)
+
+RunService.RenderStepped:Connect(function()
+    if aimbotEnabled then
+        local t = getClosestEnemy()
+        if t then
+            local part = getAimbotPart(t.Character)
+            if part then cam.CFrame = CFrame.lookAt(cam.CFrame.Position, part.Position) end
+        end
+    end
+    if spinBotEnabled and LocalPlayer.Character then
+        local root = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if root then root.CFrame = root.CFrame * CFrame.Angles(0, math.rad(spinSpeed * 2), 0) end
+    end
+end)
+
+RunService.Stepped:Connect(function()
+    if noclipEnabled and LocalPlayer.Character then
+        for _, v in pairs(LocalPlayer.Character:GetDescendants()) do
+            if v:IsA("BasePart") then v.CanCollide = false end
+        end
+    end
+    if flyEnabled and bodyVelocity and bodyGyro and LocalPlayer.Character then
+        local md = Vector3.new()
+        if UserInputService:IsKeyDown(Enum.KeyCode.W)           then md += cam.CFrame.LookVector  end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S)           then md -= cam.CFrame.LookVector  end
+        if UserInputService:IsKeyDown(Enum.KeyCode.A)           then md -= cam.CFrame.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D)           then md += cam.CFrame.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.Space)       then md += Vector3.new(0, 1, 0)  end
+        if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then md -= Vector3.new(0, 1, 0)  end
+        if md.Magnitude > 0 then md = md.Unit end
+        bodyVelocity.Velocity = md * flySpeed; bodyGyro.CFrame = cam.CFrame
+    end
+end)
+
+-- =====================================================
+-- INICIALIZAÇÃO — verifica sessão salva primeiro
+-- =====================================================
+
+local function onAuthenticated()
+    -- Pré-cria ESP
+    for _, plr in pairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer then
+            createESPForPlayer(plr)
+            plr.CharacterAdded:Connect(function()
+                task.wait(0.15)
+                local uid = tostring(plr.UserId)
+                if espObjects[uid] then
+                    if espObjects[uid].billboard then pcall(function() espObjects[uid].billboard:Destroy() end); espObjects[uid].billboard = nil end
+                    if espObjects[uid].boxAdorn  then pcall(function() espObjects[uid].boxAdorn:Destroy()  end); espObjects[uid].boxAdorn  = nil end
+                end
+            end)
+        end
+    end
+    Players.PlayerAdded:Connect(function(plr)
+        createESPForPlayer(plr)
+        plr.CharacterAdded:Connect(function()
+            task.wait(0.15)
+            local uid = tostring(plr.UserId)
+            if espObjects[uid] then
+                if espObjects[uid].billboard then pcall(function() espObjects[uid].billboard:Destroy() end); espObjects[uid].billboard = nil end
+                if espObjects[uid].boxAdorn  then pcall(function() espObjects[uid].boxAdorn:Destroy()  end); espObjects[uid].boxAdorn  = nil end
+            end
+        end)
+    end)
+    createHubGUI()
+    pcall(function()
+        game:GetService("StarterGui"):SetCore("SendNotification",{
+            Title = "⚡ Branzz V1",
+            Text  = "Hub carregado!  Insert = ocultar painel",
+            Duration = 5
+        })
+    end)
+end
+
+pcall(function()
+    game:GetService("StarterGui"):SetCore("SendNotification",{
+        Title = "⚡ Branzz V1",
+        Text  = "Pegue sua key em discord.gg/4RmZv2GyBx",
+        Duration = 6
+    })
+end)
+
+-- Verifica sessão salva
+local status, savedKey, hoursLeft, minsLeft = checkSavedSession()
+
+if status == "valid" then
+    -- Já tem sessão ativa — entra direto sem pedir key
+    pcall(function()
+        game:GetService("StarterGui"):SetCore("SendNotification",{
+            Title = "⚡ Branzz V1",
+            Text  = string.format("Key ativa! Expira em %dh %dm", hoursLeft or 0, minsLeft or 0),
+            Duration = 5
+        })
+    end)
+    onAuthenticated()
+
+elseif status == "expired" then
+    -- Sessão expirada — avisa e pede nova key
+    pcall(function()
+        game:GetService("StarterGui"):SetCore("SendNotification",{
+            Title = "⚡ Branzz V1",
+            Text  = "Sua key expirou! Insira uma nova.",
+            Duration = 5
+        })
+    end)
+    createKeySystem(onAuthenticated)
+
+else
+    -- Primeira vez ou arquivo deletado
+    createKeySystem(onAuthenticated)
+end
